@@ -9,3 +9,4 @@ cbc = { version = "0.2.0", features = ["alloc"] }
 cipher = "0.5.1"
 flate2 = "1.1.9"
 thiserror = "2.0.18"
+zip = { version = "8.5.1", default-features = false, features = ["deflate"] }

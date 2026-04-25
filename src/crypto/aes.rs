@@ -5,10 +5,12 @@ use cipher::BlockModeDecrypt;
 use flate2::read::ZlibDecoder;
 use std::fs::File;
 use std::io::{BufReader, Error, Read, Seek, SeekFrom, Write};
+use std::path::Path;
 
 type Aes128CbcDec = Decryptor<Aes128>;
 
-fn get_payload(path: &str) -> Result<Vec<u8>, Error> {
+fn get_payload(path: impl AsRef<Path>) -> Result<Vec<u8>, Error> {
+    let path = path.as_ref();
     let file = File::open(path)?;
     let mut payload = Vec::new();
     let mut reader = BufReader::new(file);
@@ -30,9 +32,9 @@ fn decompress_decrypted(decrypted: Vec<u8>) -> Result<Vec<u8>, Error> {
     Ok(decompressed)
 }
 
-pub fn unpack_reslist(
-    origin_path: &str,
-    target_path: &str,
+pub fn unpack(
+    origin_path: impl AsRef<Path>,
+    target_path: impl AsRef<Path>,
     key: &[u8; 16],
     iv: &[u8; 16],
 ) -> Result<(), Error> {

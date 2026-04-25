@@ -25,3 +25,4 @@ def save(original_path, final_data, file_ext):
 
 if __name__ == "__main__":
     unpack("ResList.bin")
+    unpack("lastdiff.bin")
