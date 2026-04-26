@@ -10,7 +10,6 @@ use std::path::Path;
 type Aes128CbcDec = Decryptor<Aes128>;
 
 fn get_payload(path: impl AsRef<Path>) -> Result<Vec<u8>, Error> {
-    let path = path.as_ref();
     let file = File::open(path)?;
     let mut payload = Vec::new();
     let mut reader = BufReader::new(file);

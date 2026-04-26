@@ -8,12 +8,11 @@ use std::error::Error as StdError;
 use std::fs::File;
 use std::io::Error;
 use std::io::{BufReader, Read};
-use std::path::Path;
 
 #[tokio::test]
 async fn test_unpack() -> Result<(), Box<dyn StdError>> {
     let config = test_get_config().await?;
-    let version = config.version.to_string();
+    let version = config.resversion.to_string();
     test_download_file(&version).await?;
     test_extract()?;
     test_unpack_reslist()?;
@@ -33,7 +32,7 @@ async fn test_download_file(version: &str) -> Result<(), Box<dyn StdError>> {
         "https://yhcdn1.wmupd.com/clientRes/publish_PC/Version/Windows/version/{}/ResList.bin.zip",
         version
     );
-    let path = Path::new("ResList.bin.zip");
+    let path = "ResList.bin.zip";
     download_file(&url, path).await?;
     Ok(())
 }
