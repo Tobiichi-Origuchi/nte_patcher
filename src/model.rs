@@ -21,7 +21,6 @@ pub struct Extra {
     pub list_hash: String,
 }
 
-/// 根节点与嵌套的资源列表
 #[derive(Deserialize)]
 pub struct ResList {
     #[serde(rename = "@version")]
@@ -34,7 +33,6 @@ pub struct ResList {
     pub base_versions: Vec<BaseVersion>,
 }
 
-/// 独立文件资源
 #[derive(Deserialize)]
 pub struct Res {
     #[serde(rename = "@filename")]
@@ -49,7 +47,6 @@ pub struct Res {
     pub blocks: Vec<Block>,
 }
 
-/// 大文件分块信息
 #[derive(Deserialize)]
 pub struct Block {
     #[serde(rename = "@index")]
@@ -62,14 +59,12 @@ pub struct Block {
     pub md5: String,
 }
 
-/// 打包下载集合
 #[derive(Deserialize)]
 pub struct Package {
     #[serde(rename = "Pak", default)]
     pub paks: Vec<Pak>,
 }
 
-/// 单个打包文件（通常是一个合并下载用的压缩包或数据流）
 #[derive(Deserialize)]
 pub struct Pak {
     #[serde(rename = "@md5")]
@@ -80,7 +75,6 @@ pub struct Pak {
     pub entries: Vec<Entry>,
 }
 
-/// 打包文件内部的文件条目
 #[derive(Deserialize)]
 pub struct Entry {
     #[serde(rename = "@name")]
@@ -97,7 +91,6 @@ pub struct Entry {
     pub check: Option<u8>,
 }
 
-/// 历史版本增量包信息
 #[derive(Deserialize)]
 pub struct BaseVersion {
     #[serde(rename = "@version")]
