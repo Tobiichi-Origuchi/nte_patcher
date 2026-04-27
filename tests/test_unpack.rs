@@ -1,3 +1,4 @@
+use md5::{Digest, Md5};
 use nte_patcher::crypto::aes::unpack;
 use nte_patcher::crypto::archive::extract;
 use nte_patcher::downloader::worker::download_file;
@@ -6,17 +7,33 @@ use nte_patcher::parser::get_config;
 use reqwest::Url;
 use std::error::Error as StdError;
 use std::fs::File;
+use std::fs::read;
 use std::io::Error;
 use std::io::{BufReader, Read};
+
+fn md5(file_path: &str) -> Result<String, Error> {
+    let data = read(file_path)?;
+    let mut hasher = Md5::new();
+    hasher.update(&data);
+    let result = hasher.finalize();
+    let hex = hex::encode(result);
+    Ok(hex)
+}
 
 #[tokio::test]
 async fn test_unpack() -> Result<(), Box<dyn StdError>> {
     let config = test_get_config().await?;
     let version = config.resversion.to_string();
+    let diffhash = config.extra.diffhash;
+    let listhash = config.extra.listhash;
     test_download_file(&version).await?;
     test_extract()?;
     test_unpack_reslist()?;
     test_unpack_lastdiff()?;
+    let diffhash_actual = md5("lastdiff.xml")?;
+    let listhash_actual = md5("ResList.xml")?;
+    assert_eq!(diffhash, diffhash_actual);
+    assert_eq!(listhash, listhash_actual);
     Ok(())
 }
 
