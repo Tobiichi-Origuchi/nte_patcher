@@ -2,7 +2,7 @@ use nte_patcher::crypto::aes::unpack;
 use nte_patcher::crypto::archive::extract;
 use nte_patcher::downloader::worker::download_file;
 use nte_patcher::model::Config;
-use nte_patcher::parser::manifest::get_config;
+use nte_patcher::parser::get_config;
 use reqwest::Url;
 use std::error::Error as StdError;
 use std::fs::File;
@@ -22,14 +22,14 @@ async fn test_unpack() -> Result<(), Box<dyn StdError>> {
 
 async fn test_get_config() -> Result<Config, Box<dyn StdError>> {
     let url =
-        Url::parse("https://yhcdn1.wmupd.com/clientRes/publish_PC/Version/Windows/config.xml")?;
+        Url::parse("https://ntecdn1.wmupd.com/clientRes/publish_PC/Version/Windows/config.xml")?;
     let config: Config = get_config(url).await?;
     Ok(config)
 }
 
 async fn test_download_file(version: &str) -> Result<(), Box<dyn StdError>> {
     let url = format!(
-        "https://yhcdn1.wmupd.com/clientRes/publish_PC/Version/Windows/version/{}/ResList.bin.zip",
+        "https://ntecdn1.wmupd.com/clientRes/publish_PC/Version/Windows/version/{}/ResList.bin.zip",
         version
     );
     let path = "ResList.bin.zip";
@@ -49,7 +49,7 @@ fn test_extract() -> Result<(), Error> {
 fn test_unpack_reslist() -> Result<(), Error> {
     let origin_path = "ResList.bin";
     let target_path = "ResList.xml";
-    let key = b"1289@Patcher0000";
+    let key = b"3000001@Patcher0";
     let iv = b"PatcherSDK000000";
     unpack(origin_path, target_path, key, iv)?;
     Ok(())
@@ -58,7 +58,7 @@ fn test_unpack_reslist() -> Result<(), Error> {
 fn test_unpack_lastdiff() -> Result<(), Error> {
     let origin_path = "lastdiff.bin";
     let target_path = "lastdiff.xml";
-    let key = b"1289@Patcher0000";
+    let key = b"3000001@Patcher0";
     let iv = b"PatcherSDK000000";
     unpack(origin_path, target_path, key, iv)?;
     Ok(())

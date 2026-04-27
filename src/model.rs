@@ -16,9 +16,9 @@ pub struct Config {
 #[derive(Deserialize)]
 pub struct Extra {
     #[serde(rename = "diffHash")]
-    pub diff_hash: String,
+    pub diffhash: String,
     #[serde(rename = "listHash")]
-    pub list_hash: String,
+    pub listhash: String,
 }
 
 #[derive(Deserialize)]
@@ -32,7 +32,7 @@ pub struct ResList {
     #[serde(rename = "Package")]
     pub package: Option<Package>,
     #[serde(rename = "BaseVersion")]
-    pub base_version: Vec<BaseVersion>,
+    pub baseversion: Vec<BaseVersion>,
 }
 
 #[derive(Deserialize)]
@@ -44,7 +44,7 @@ pub struct Res {
     #[serde(rename = "@md5")]
     pub md5: String,
     #[serde(rename = "@blockSize")]
-    pub block_size: Option<u8>,
+    pub blocksize: Option<u8>,
     #[serde(rename = "Block")]
     pub block: Vec<Block>,
 }
@@ -100,7 +100,7 @@ pub struct BaseVersion {
     #[serde(rename = "@tag")]
     pub tag: String,
     #[serde(rename = "ResList")]
-    pub res_list: ResList,
+    pub reslist: ResList,
 }
 
 #[derive(Deserialize)]
