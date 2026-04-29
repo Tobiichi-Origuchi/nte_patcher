@@ -4,29 +4,28 @@ use crate::{
 };
 use quick_xml::de::from_reader;
 use reqwest::{Url, get};
+use serde::de::DeserializeOwned;
 use std::{
     fs::File,
     io::{BufReader, Cursor},
     path::Path,
 };
 
+fn parse<T: DeserializeOwned>(path: impl AsRef<Path>) -> Result<T, Error> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    Ok(from_reader(reader)?)
+}
+
 pub async fn get_config(url: Url) -> Result<Config, Error> {
     let response = get(url).await?.bytes().await?;
-    let cursor = Cursor::new(response);
-    let config: Config = from_reader(cursor)?;
-    Ok(config)
+    Ok(from_reader(Cursor::new(response))?)
 }
 
 pub fn get_reslist(path: impl AsRef<Path>) -> Result<ResList, Error> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let reslist: ResList = from_reader(reader)?;
-    Ok(reslist)
+    parse(path)
 }
 
 pub fn get_lastdiff(path: impl AsRef<Path>) -> Result<PatchList, Error> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let reslist: PatchList = from_reader(reader)?;
-    Ok(reslist)
+    parse(path)
 }
