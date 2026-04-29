@@ -48,7 +48,8 @@ async fn test_download_file(version: &str) -> Result<(), Error> {
         version
     );
     let path = "ResList.bin.zip";
-    download_file(&url, path).await?;
+    let client = reqwest::Client::new();
+    download_file(&client, &url, path).await?;
     Ok(())
 }
 
