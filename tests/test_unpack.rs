@@ -1,15 +1,13 @@
 use md5::{Digest, Md5};
-use nte_patcher::crypto::aes::unpack;
-use nte_patcher::crypto::archive::extract;
-use nte_patcher::downloader::worker::download_file;
-use nte_patcher::model::Config;
-use nte_patcher::parser::get_config;
+use nte_patcher::{
+    crypto::aes_cbc, download::download_file, error::Error, model::Config, parser::get_config,
+    unzip::extract,
+};
 use reqwest::Url;
-use std::error::Error as StdError;
-use std::fs::File;
-use std::fs::read;
-use std::io::Error;
-use std::io::{BufReader, Read};
+use std::{
+    fs::{File, read},
+    io::{BufReader, Read},
+};
 
 fn md5(file_path: &str) -> Result<String, Error> {
     let data = read(file_path)?;
@@ -21,7 +19,7 @@ fn md5(file_path: &str) -> Result<String, Error> {
 }
 
 #[tokio::test]
-async fn test_unpack() -> Result<(), Box<dyn StdError>> {
+async fn test_unpack() -> Result<(), Error> {
     let config = test_get_config().await?;
     let version = config.resversion.to_string();
     let diffhash = config.extra.diffhash;
@@ -37,14 +35,14 @@ async fn test_unpack() -> Result<(), Box<dyn StdError>> {
     Ok(())
 }
 
-async fn test_get_config() -> Result<Config, Box<dyn StdError>> {
+async fn test_get_config() -> Result<Config, Error> {
     let url =
         Url::parse("https://ntecdn1.wmupd.com/clientRes/publish_PC/Version/Windows/config.xml")?;
     let config: Config = get_config(url).await?;
     Ok(config)
 }
 
-async fn test_download_file(version: &str) -> Result<(), Box<dyn StdError>> {
+async fn test_download_file(version: &str) -> Result<(), Error> {
     let url = format!(
         "https://ntecdn1.wmupd.com/clientRes/publish_PC/Version/Windows/version/{}/ResList.bin.zip",
         version
@@ -68,7 +66,7 @@ fn test_unpack_reslist() -> Result<(), Error> {
     let target_path = "ResList.xml";
     let key = b"3000001@Patcher0";
     let iv = b"PatcherSDK000000";
-    unpack(origin_path, target_path, key, iv)?;
+    aes_cbc(origin_path, target_path, key, iv)?;
     Ok(())
 }
 
@@ -77,6 +75,6 @@ fn test_unpack_lastdiff() -> Result<(), Error> {
     let target_path = "lastdiff.xml";
     let key = b"3000001@Patcher0";
     let iv = b"PatcherSDK000000";
-    unpack(origin_path, target_path, key, iv)?;
+    aes_cbc(origin_path, target_path, key, iv)?;
     Ok(())
 }

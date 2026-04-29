@@ -1,6 +1,8 @@
-use std::fs::{File, create_dir_all};
-use std::io::{Cursor, Error, copy};
-use std::path::Path;
+use std::{
+    fs::{File, create_dir_all},
+    io::{Cursor, Error, copy},
+    path::Path,
+};
 use zip::ZipArchive;
 
 pub fn extract(data: &[u8], base_path: impl AsRef<Path>) -> Result<(), Error> {
