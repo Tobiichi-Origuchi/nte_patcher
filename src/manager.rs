@@ -74,6 +74,8 @@ impl DownloadManager {
             result?;
         }
 
+        drop(stream);
+
         let _ = progress_task.await;
 
         Ok(())
