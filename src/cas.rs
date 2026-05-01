@@ -4,7 +4,7 @@ use md5::{Digest, Md5};
 use reqwest::{Client, header::RANGE};
 use std::path::{Path, PathBuf};
 use tokio::fs::{self, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 
 pub struct BucketManager {
     client: Client,
@@ -118,15 +118,22 @@ impl BucketManager {
             if existing_size > expected_size {
                 file.set_len(0).await?;
             } else {
-                let mut buf = [0u8; 65536];
-                file.seek(SeekFrom::Start(0)).await?;
-                loop {
-                    let n = file.read(&mut buf).await?;
-                    if n == 0 {
-                        break;
+                let tmp_path_c = tmp_path.to_path_buf();
+                hasher = tokio::task::spawn_blocking(move || -> Result<Md5, std::io::Error> {
+                    let mut std_file = std::fs::File::open(&tmp_path_c)?;
+                    let mut h = Md5::new();
+                    let mut buf = [0u8; 65536];
+                    loop {
+                        let n = std::io::Read::read(&mut std_file, &mut buf)?;
+                        if n == 0 {
+                            break;
+                        }
+                        h.update(&buf[..n]);
                     }
-                    hasher.update(&buf[..n]);
-                }
+                    Ok(h)
+                })
+                .await
+                .unwrap()?;
                 on_progress(existing_size);
             }
         }

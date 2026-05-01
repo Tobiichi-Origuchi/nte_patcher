@@ -7,7 +7,7 @@ use reqwest::{Client, header::RANGE};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 
 pub struct Downloader {
     client: Client,
@@ -37,13 +37,44 @@ impl Downloader {
         let task_c = task.clone();
         let game_dir = self.game_dir.clone();
 
+        let highest_reported = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
         retry::with_retry(3, || {
             let cas_mgr = self.cas_manager.clone();
             let client = self.client.clone();
             let url = url_c.clone();
             let task = task_c.clone();
             let game_dir = game_dir.clone();
-            let prog = on_progress.clone();
+
+            let try_progress = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let highest = highest_reported.clone();
+            let original_prog = on_progress.clone();
+
+            let prog = move |delta: u64| {
+                if delta == 0 {
+                    return;
+                }
+                let new_current =
+                    try_progress.fetch_add(delta, std::sync::atomic::Ordering::Relaxed) + delta;
+                let mut old_highest = highest.load(std::sync::atomic::Ordering::Acquire);
+                loop {
+                    if new_current <= old_highest {
+                        break;
+                    }
+                    match highest.compare_exchange_weak(
+                        old_highest,
+                        new_current,
+                        std::sync::atomic::Ordering::SeqCst,
+                        std::sync::atomic::Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            original_prog(new_current - old_highest);
+                            break;
+                        }
+                        Err(h) => old_highest = h,
+                    }
+                }
+            };
 
             async move {
                 match &task.task_type {
@@ -68,7 +99,6 @@ impl Downloader {
                             .await?;
 
                         let pak_bucket_path = cas_mgr.get_bucket_path(&task.md5, task.filesize);
-                        let mut pak_file = fs::File::open(&pak_bucket_path).await?;
 
                         for entry in entries {
                             let entry_target = game_dir.join(&entry.name);
@@ -83,14 +113,27 @@ impl Downloader {
                                     fs::create_dir_all(parent).await?;
                                 }
                                 let tmp_path = cas_mgr.get_tmp_path(&entry.md5, entry.size);
-                                let raw_out_file = fs::File::create(&tmp_path).await?;
-                                let mut out_file =
-                                    tokio::io::BufWriter::with_capacity(65536, raw_out_file);
+                                let pak_path_c = pak_bucket_path.clone();
+                                let tmp_path_c = tmp_path.clone();
+                                let offset = entry.offset;
+                                let size = entry.size;
 
-                                pak_file.seek(SeekFrom::Start(entry.offset)).await?;
-                                let mut chunk = (&mut pak_file).take(entry.size);
-                                tokio::io::copy(&mut chunk, &mut out_file).await?;
-                                out_file.flush().await?;
+                                tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+                                    use std::io::{Read, Seek, SeekFrom, Write};
+                                    let mut p_file = std::fs::File::open(&pak_path_c)?;
+                                    p_file.seek(SeekFrom::Start(offset))?;
+                                    let mut chunk = p_file.take(size);
+
+                                    let t_file = std::fs::File::create(&tmp_path_c)?;
+                                    let mut buf_writer =
+                                        std::io::BufWriter::with_capacity(65536, t_file);
+
+                                    std::io::copy(&mut chunk, &mut buf_writer)?;
+                                    buf_writer.flush()?;
+                                    Ok(())
+                                })
+                                .await
+                                .unwrap()?;
 
                                 fs::rename(&tmp_path, &entry_bucket_path).await?;
                             }
