@@ -25,8 +25,11 @@ impl BucketManager {
     }
 
     pub fn get_tmp_path(&self, md5: &str, size: u64) -> PathBuf {
-        let shard = if md5.is_empty() { "0" } else { &md5[0..1] };
-        self.bucket_dir.join(shard).join(format!("tmp.{}.{}", md5, size))
+        let shard = md5.get(0..1).unwrap_or("0");
+        // suffix with timestamp to avoid collisions
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        self.bucket_dir.join(shard).join(format!("tmp.{}.{}.{}", md5, size, ts))
     }
 
     pub async fn sync_file<F>(
@@ -52,9 +55,14 @@ impl BucketManager {
         }
 
         if target_path.exists() || fs::symlink_metadata(target_path).await.is_ok() {
-            if fs::read_link(target_path).await.map(|p| p == bucket_path).unwrap_or(false) && bucket_path.exists() {
-                on_progress(expected_size);
-                return Ok(());
+            if let Ok(p) = fs::read_link(target_path).await {
+                // use absolute paths to compare symlink target and bucket path
+                let is_same = fs::canonicalize(&p).await.unwrap_or_default() ==
+                              fs::canonicalize(&bucket_path).await.unwrap_or_default();
+                if is_same && bucket_path.exists() {
+                    on_progress(expected_size);
+                    return Ok(());
+                }
             } else {
                 fs::remove_file(target_path).await?;
             }
@@ -107,6 +115,13 @@ impl BucketManager {
         if existing_size < expected_size {
             let range_header = format!("bytes={}-", existing_size);
             let response = self.client.get(url).header(RANGE, range_header).send().await?.error_for_status()?;
+            // if the server responds with a 200 OK, reset the file and start over
+            if response.status() == reqwest::StatusCode::OK {
+                file.set_len(0).await?;
+                file.seek(SeekFrom::Start(0)).await?;
+                hasher = Md5::new();
+                on_progress(0);
+            }
             let mut stream = response.bytes_stream();
 
             while let Some(chunk_result) = stream.next().await {
