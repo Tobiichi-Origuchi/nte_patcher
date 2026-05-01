@@ -55,7 +55,6 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
     );
     let reslist_zip_path = base_path.join("ResList.bin.zip");
     let client = reqwest::Client::builder()
-        .user_agent("nte_patcher/0.1")
         .build()
         .map_err(Error::Reqwest)?;
     download_file(&client, &reslist_zip_url, reslist_zip_path.to_str().unwrap()).await?;

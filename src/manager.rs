@@ -15,7 +15,6 @@ pub struct DownloadManager {
 impl DownloadManager {
     pub fn new(base_url: &str, bucket_dir: PathBuf, game_dir: PathBuf, max_concurrent: usize) -> Self {
         let client = Client::builder()
-            .user_agent("nte_patcher/0.1")
             .tcp_keepalive(std::time::Duration::from_secs(60))
             .build()
             .unwrap();
