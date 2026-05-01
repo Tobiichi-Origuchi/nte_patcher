@@ -1,6 +1,13 @@
 [package]
 name = "nte_patcher"
 version = "0.1.2"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/Tobiichi-Origuchi/nte_patcher"
+# documentation = "https://docs.rs/nte_patcher"
+description = "Rust implementation of NTE PatcherSDK"
+keywords = ["NTE", "Patcher", "SDK", "Game"]
+# categories = [""]
 edition = "2024"
 
 [dependencies]
