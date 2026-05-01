@@ -44,7 +44,7 @@ impl DownloadManager {
             }
         });
 
-        let mut stream = stream::iter(tasks.into_iter().map(|task| {
+        let futures: Vec<_> = tasks.into_iter().map(|task| {
             let downloader = self.downloader.clone();
             let url = self.build_url(&task.md5, task.filesize);
             let tx = tx.clone();
@@ -54,8 +54,11 @@ impl DownloadManager {
                     let _ = tx.send(bytes);
                 }).await
             })
-        }))
-        .buffer_unordered(self.max_concurrent_tasks);
+        }).collect();
+
+        drop(tx);
+
+        let mut stream = stream::iter(futures).buffer_unordered(self.max_concurrent_tasks);
 
         while let Some(result) = stream.next().await {
             result.map_err(|e| Error::Io(std::io::Error::other(e.to_string())))??;
