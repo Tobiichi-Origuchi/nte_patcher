@@ -122,7 +122,7 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
         base_url,
         bucket_dir.clone(),
         game_dir.clone(),
-        2, // max_concurrent
+        4, // max_concurrent
     );
 
     let downloaded_bytes = Arc::new(AtomicU64::new(0));

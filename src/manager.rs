@@ -32,7 +32,7 @@ impl DownloadManager {
     }
 
     fn build_url(&self, md5: &str, size: u64) -> String {
-        let shard = &md5[0..1];
+        let shard = md5.get(0..1).unwrap_or("0");
         format!("{}/Res/{}/{}.{}", self.base_url, shard, md5, size)
     }
 
@@ -48,29 +48,30 @@ impl DownloadManager {
             }
         });
 
-        let futures: Vec<_> = tasks
-            .into_iter()
-            .map(|task| {
+        let stream_iter = tasks.into_iter().map({
+            let base_tx = tx.clone();
+            move |task| {
                 let downloader = self.downloader.clone();
                 let url = self.build_url(&task.md5, task.filesize);
-                let tx = tx.clone();
 
-                tokio::spawn(async move {
+                let task_tx = base_tx.clone();
+
+                async move {
                     downloader
                         .execute_task(&url, &task, move |bytes| {
-                            let _ = tx.send(bytes);
+                            let _ = task_tx.send(bytes);
                         })
                         .await
-                })
-            })
-            .collect();
+                }
+            }
+        });
 
         drop(tx);
 
-        let mut stream = stream::iter(futures).buffer_unordered(self.max_concurrent_tasks);
+        let mut stream = stream::iter(stream_iter).buffer_unordered(self.max_concurrent_tasks);
 
         while let Some(result) = stream.next().await {
-            result.map_err(|e| Error::Io(std::io::Error::other(e.to_string())))??;
+            result?;
         }
 
         let _ = progress_task.await;
