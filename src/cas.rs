@@ -1,7 +1,7 @@
 use crate::error::Error;
 use futures_util::StreamExt;
 use md5::{Digest, Md5};
-use reqwest::{header::RANGE, Client};
+use reqwest::{Client, header::RANGE};
 use std::path::{Path, PathBuf};
 use tokio::fs::{self, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
@@ -21,15 +21,22 @@ impl BucketManager {
 
     pub fn get_bucket_path(&self, md5: &str, size: u64) -> PathBuf {
         let shard = if md5.is_empty() { "0" } else { &md5[0..1] };
-        self.bucket_dir.join(shard).join(format!("{}.{}", md5, size))
+        self.bucket_dir
+            .join(shard)
+            .join(format!("{}.{}", md5, size))
     }
 
     pub fn get_tmp_path(&self, md5: &str, size: u64) -> PathBuf {
         let shard = md5.get(0..1).unwrap_or("0");
         // suffix with timestamp to avoid collisions
         use std::time::{SystemTime, UNIX_EPOCH};
-        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        self.bucket_dir.join(shard).join(format!("tmp.{}.{}.{}", md5, size, ts))
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        self.bucket_dir
+            .join(shard)
+            .join(format!("tmp.{}.{}.{}", md5, size, ts))
     }
 
     pub async fn sync_file<F>(
@@ -57,8 +64,8 @@ impl BucketManager {
         if target_path.exists() || fs::symlink_metadata(target_path).await.is_ok() {
             if let Ok(p) = fs::read_link(target_path).await {
                 // use absolute paths to compare symlink target and bucket path
-                let is_same = fs::canonicalize(&p).await.unwrap_or_default() ==
-                              fs::canonicalize(&bucket_path).await.unwrap_or_default();
+                let is_same = fs::canonicalize(&p).await.unwrap_or_default()
+                    == fs::canonicalize(&bucket_path).await.unwrap_or_default();
                 if is_same && bucket_path.exists() {
                     on_progress(expected_size);
                     return Ok(());
@@ -69,7 +76,14 @@ impl BucketManager {
         }
 
         if !bucket_path.exists() {
-            self.download_to_tmp(url, &tmp_path, expected_md5, expected_size, &mut on_progress).await?;
+            self.download_to_tmp(
+                url,
+                &tmp_path,
+                expected_md5,
+                expected_size,
+                &mut on_progress,
+            )
+            .await?;
             fs::rename(&tmp_path, &bucket_path).await?;
         } else {
             on_progress(expected_size);
@@ -91,7 +105,13 @@ impl BucketManager {
         F: FnMut(u64),
     {
         let mut hasher = Md5::new();
-        let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(tmp_path).await?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(tmp_path)
+            .await?;
 
         let existing_size = file.metadata().await?.len();
         if existing_size > 0 {
@@ -102,7 +122,9 @@ impl BucketManager {
                 file.seek(SeekFrom::Start(0)).await?;
                 loop {
                     let n = file.read(&mut buf).await?;
-                    if n == 0 { break; }
+                    if n == 0 {
+                        break;
+                    }
                     hasher.update(&buf[..n]);
                 }
                 on_progress(existing_size);
@@ -114,7 +136,13 @@ impl BucketManager {
 
         if existing_size < expected_size {
             let range_header = format!("bytes={}-", existing_size);
-            let response = self.client.get(url).header(RANGE, range_header).send().await?.error_for_status()?;
+            let response = self
+                .client
+                .get(url)
+                .header(RANGE, range_header)
+                .send()
+                .await?
+                .error_for_status()?;
             // if the server responds with a 200 OK, reset the file and start over
             if response.status() == reqwest::StatusCode::OK {
                 file.set_len(0).await?;
@@ -148,6 +176,10 @@ impl BucketManager {
 }
 
 #[cfg(unix)]
-async fn create_symlink(original: &Path, link: &Path) -> std::io::Result<()> { tokio::fs::symlink(original, link).await }
+async fn create_symlink(original: &Path, link: &Path) -> std::io::Result<()> {
+    tokio::fs::symlink(original, link).await
+}
 #[cfg(windows)]
-async fn create_symlink(original: &Path, link: &Path) -> std::io::Result<()> { tokio::fs::symlink_file(original, link).await }
+async fn create_symlink(original: &Path, link: &Path) -> std::io::Result<()> {
+    tokio::fs::symlink_file(original, link).await
+}

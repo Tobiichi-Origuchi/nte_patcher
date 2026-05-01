@@ -1,10 +1,10 @@
+pub mod cas;
 pub mod crypto;
 pub mod download;
 pub mod error;
+pub mod manager;
 pub mod model;
 pub mod parser;
+pub mod retry;
 pub mod unzip;
 pub mod verify;
-pub mod retry;
-pub mod cas;
-pub mod manager;

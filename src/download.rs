@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::model::{ResTask, TaskType};
 use crate::{retry, verify};
 use futures_util::StreamExt;
-use reqwest::{header::RANGE, Client};
+use reqwest::{Client, header::RANGE};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
@@ -24,7 +24,12 @@ impl Downloader {
         }
     }
 
-    pub async fn execute_task<F>(&self, url: &str, task: &ResTask, on_progress: F) -> Result<(), Error>
+    pub async fn execute_task<F>(
+        &self,
+        url: &str,
+        task: &ResTask,
+        on_progress: F,
+    ) -> Result<(), Error>
     where
         F: Fn(u64) + Send + Sync + Clone + 'static,
     {
@@ -44,12 +49,23 @@ impl Downloader {
                 match &task.task_type {
                     TaskType::Normal => {
                         let target_path = game_dir.join(&task.target_path);
-                        cas_mgr.sync_file(&url, &target_path, &task.md5, task.filesize, prog).await?;
+                        cas_mgr
+                            .sync_file(&url, &target_path, &task.md5, task.filesize, prog)
+                            .await?;
                     }
 
                     TaskType::Pak { entries } => {
-                        let pak_symlink_target = game_dir.join(format!(".pak_cache/{}.pak", task.md5));
-                        cas_mgr.sync_file(&url, &pak_symlink_target, &task.md5, task.filesize, prog.clone()).await?;
+                        let pak_symlink_target =
+                            game_dir.join(format!(".pak_cache/{}.pak", task.md5));
+                        cas_mgr
+                            .sync_file(
+                                &url,
+                                &pak_symlink_target,
+                                &task.md5,
+                                task.filesize,
+                                prog.clone(),
+                            )
+                            .await?;
 
                         let pak_bucket_path = cas_mgr.get_bucket_path(&task.md5, task.filesize);
                         let mut pak_file = fs::File::open(&pak_bucket_path).await?;
@@ -78,8 +94,10 @@ impl Downloader {
                             }
 
                             let _ = fs::remove_file(&entry_target).await;
-                            #[cfg(unix)] fs::symlink(&entry_bucket_path, &entry_target).await?;
-                            #[cfg(windows)] fs::symlink_file(&entry_bucket_path, &entry_target).await?;
+                            #[cfg(unix)]
+                            fs::symlink(&entry_bucket_path, &entry_target).await?;
+                            #[cfg(windows)]
+                            fs::symlink_file(&entry_bucket_path, &entry_target).await?;
                         }
 
                         let _ = fs::remove_file(&pak_symlink_target).await;
@@ -93,20 +111,37 @@ impl Downloader {
                         if bucket_path.exists() {
                             prog(task.filesize);
                         } else {
-                            if let Some(parent) = target_path.parent() { fs::create_dir_all(parent).await?; }
-                            if let Some(parent) = bucket_path.parent() { fs::create_dir_all(parent).await?; }
+                            if let Some(parent) = target_path.parent() {
+                                fs::create_dir_all(parent).await?;
+                            }
+                            if let Some(parent) = bucket_path.parent() {
+                                fs::create_dir_all(parent).await?;
+                            }
 
-                            let mut file = fs::OpenOptions::new().write(true).read(true).create(true).truncate(false).open(&tmp_path).await?;
+                            let mut file = fs::OpenOptions::new()
+                                .write(true)
+                                .read(true)
+                                .create(true)
+                                .truncate(false)
+                                .open(&tmp_path)
+                                .await?;
                             if file.metadata().await?.len() != task.filesize {
                                 file.set_len(task.filesize).await?;
                             }
 
                             for block in blocks {
-                                let range_header = format!("bytes={}-{}", block.start, block.start + block.size - 1);
+                                let range_header = format!(
+                                    "bytes={}-{}",
+                                    block.start,
+                                    block.start + block.size - 1
+                                );
 
-                                let response = client.get(&url)
+                                let response = client
+                                    .get(&url)
                                     .header(RANGE, range_header)
-                                    .send().await?.error_for_status()?;
+                                    .send()
+                                    .await?
+                                    .error_for_status()?;
 
                                 file.seek(SeekFrom::Start(block.start)).await?;
                                 let mut stream = response.bytes_stream();
@@ -132,8 +167,10 @@ impl Downloader {
                         }
 
                         let _ = fs::remove_file(&target_path).await;
-                        #[cfg(unix)] fs::symlink(&bucket_path, &target_path).await?;
-                        #[cfg(windows)] fs::symlink_file(&bucket_path, &target_path).await?;
+                        #[cfg(unix)]
+                        fs::symlink(&bucket_path, &target_path).await?;
+                        #[cfg(windows)]
+                        fs::symlink_file(&bucket_path, &target_path).await?;
                     }
                 }
                 Ok(())

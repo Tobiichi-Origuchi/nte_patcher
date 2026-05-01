@@ -13,7 +13,12 @@ pub struct DownloadManager {
 }
 
 impl DownloadManager {
-    pub fn new(base_url: &str, bucket_dir: PathBuf, game_dir: PathBuf, max_concurrent: usize) -> Self {
+    pub fn new(
+        base_url: &str,
+        bucket_dir: PathBuf,
+        game_dir: PathBuf,
+        max_concurrent: usize,
+    ) -> Self {
         let client = Client::builder()
             .tcp_keepalive(std::time::Duration::from_secs(60))
             .build()
@@ -43,17 +48,22 @@ impl DownloadManager {
             }
         });
 
-        let futures: Vec<_> = tasks.into_iter().map(|task| {
-            let downloader = self.downloader.clone();
-            let url = self.build_url(&task.md5, task.filesize);
-            let tx = tx.clone();
+        let futures: Vec<_> = tasks
+            .into_iter()
+            .map(|task| {
+                let downloader = self.downloader.clone();
+                let url = self.build_url(&task.md5, task.filesize);
+                let tx = tx.clone();
 
-            tokio::spawn(async move {
-                downloader.execute_task(&url, &task, move |bytes| {
-                    let _ = tx.send(bytes);
-                }).await
+                tokio::spawn(async move {
+                    downloader
+                        .execute_task(&url, &task, move |bytes| {
+                            let _ = tx.send(bytes);
+                        })
+                        .await
+                })
             })
-        }).collect();
+            .collect();
 
         drop(tx);
 
