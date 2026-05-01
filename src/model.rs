@@ -132,3 +132,50 @@ pub struct Section {
     #[serde(rename = "Patch")]
     pub patch: Vec<Patch>,
 }
+
+pub enum TaskType {
+    Normal,
+    Block { blocks: Vec<Block> },
+    Pak { entries: Vec<Entry> },
+}
+
+pub struct ResTask {
+    pub target_path: String,
+    pub filesize: u64,
+    pub md5: String,
+    pub task_type: TaskType,
+}
+
+impl ResTask {
+    pub fn from_reslist(reslist: ResList) -> Vec<Self> {
+        let mut tasks = Vec::new();
+
+        for res in reslist.res {
+            let task_type = if res.block.is_empty() {
+                TaskType::Normal
+            } else {
+                TaskType::Block { blocks: res.block }
+            };
+
+            tasks.push(ResTask {
+                target_path: res.filename,
+                filesize: res.filesize,
+                md5: res.md5,
+                task_type,
+            });
+        }
+
+        if let Some(package) = reslist.package {
+            for pak in package.pak {
+                tasks.push(ResTask {
+                    target_path: format!("{}.pak", pak.md5),
+                    filesize: pak.filesize,
+                    md5: pak.md5.clone(),
+                    task_type: TaskType::Pak { entries: pak.entry },
+                });
+            }
+        }
+
+        tasks
+    }
+}

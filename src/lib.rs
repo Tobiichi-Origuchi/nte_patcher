@@ -4,3 +4,7 @@ pub mod error;
 pub mod model;
 pub mod parser;
 pub mod unzip;
+pub mod verify;
+pub mod retry;
+pub mod cas;
+pub mod manager;
