@@ -19,6 +19,16 @@ impl BucketManager {
         }
     }
 
+    pub fn get_bucket_path(&self, md5: &str, size: u64) -> PathBuf {
+        let shard = if md5.is_empty() { "0" } else { &md5[0..1] };
+        self.bucket_dir.join(shard).join(format!("{}.{}", md5, size))
+    }
+
+    pub fn get_tmp_path(&self, md5: &str, size: u64) -> PathBuf {
+        let shard = if md5.is_empty() { "0" } else { &md5[0..1] };
+        self.bucket_dir.join(shard).join(format!("tmp.{}.{}", md5, size))
+    }
+
     pub async fn sync_file<F>(
         &self,
         url: &str,
@@ -30,33 +40,33 @@ impl BucketManager {
     where
         F: FnMut(u64),
     {
-        let bucket_filename = format!("{}.{}", expected_md5, expected_size);
-        let bucket_path = self.bucket_dir.join(&bucket_filename);
-        let tmp_path = self.bucket_dir.join(format!("tmp.{}", bucket_filename));
+        let bucket_path = self.get_bucket_path(expected_md5, expected_size);
+        let tmp_path = self.get_tmp_path(expected_md5, expected_size);
+
+        if let Some(parent) = bucket_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
 
         if let Some(parent) = target_path.parent() {
             fs::create_dir_all(parent).await?;
         }
 
-        // 1. 检查目标软链接
         if target_path.exists() || fs::symlink_metadata(target_path).await.is_ok() {
             if fs::read_link(target_path).await.map(|p| p == bucket_path).unwrap_or(false) && bucket_path.exists() {
-                on_progress(expected_size); // 已同步
+                on_progress(expected_size);
                 return Ok(());
             } else {
-                fs::remove_file(target_path).await?; // 失效链接，移除
+                fs::remove_file(target_path).await?;
             }
         }
 
-        // 2. CAS 桶下载逻辑
         if !bucket_path.exists() {
             self.download_to_tmp(url, &tmp_path, expected_md5, expected_size, &mut on_progress).await?;
-            fs::rename(&tmp_path, &bucket_path).await?; // 原子生效
+            fs::rename(&tmp_path, &bucket_path).await?;
         } else {
-            on_progress(expected_size); // 桶里已有，直接满进度
+            on_progress(expected_size);
         }
 
-        // 3. 建立软链接
         create_symlink(&bucket_path, target_path).await?;
         Ok(())
     }
@@ -73,7 +83,7 @@ impl BucketManager {
         F: FnMut(u64),
     {
         let mut hasher = Md5::new();
-        let mut file = OpenOptions::new().read(true).write(true).create(true).open(tmp_path).await?;
+        let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(tmp_path).await?;
 
         let existing_size = file.metadata().await?.len();
         if existing_size > 0 {
@@ -92,11 +102,11 @@ impl BucketManager {
         }
 
         file.seek(SeekFrom::End(0)).await?;
-        let existing_size = file.metadata().await?.len(); // 重新获取
+        let existing_size = file.metadata().await?.len();
 
         if existing_size < expected_size {
             let range_header = format!("bytes={}-", existing_size);
-            let mut response = self.client.get(url).header(RANGE, range_header).send().await?.error_for_status()?;
+            let response = self.client.get(url).header(RANGE, range_header).send().await?.error_for_status()?;
             let mut stream = response.bytes_stream();
 
             while let Some(chunk_result) = stream.next().await {
@@ -112,7 +122,10 @@ impl BucketManager {
         if final_md5 != expected_md5 {
             drop(file);
             let _ = fs::remove_file(tmp_path).await;
-            return Err(format!("MD5 mismatch! Expected {}, got {}", expected_md5, final_md5).into());
+            return Err(Error::Md5Mismatch {
+                expected: expected_md5.to_string(),
+                actual: final_md5,
+            });
         }
 
         Ok(())

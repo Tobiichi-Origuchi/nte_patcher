@@ -23,15 +23,15 @@ pub struct Extra {
 
 #[derive(Deserialize)]
 pub struct ResList {
-    #[serde(rename = "@version")]
-    pub version: Version,
-    #[serde(rename = "@tag")]
-    pub tag: String,
-    #[serde(rename = "Res")]
+    #[serde(rename = "@version", default)]
+    pub version: Option<Version>,
+    #[serde(rename = "@tag", default)]
+    pub tag: Option<String>,
+    #[serde(rename = "Res", default)]
     pub res: Vec<Res>,
     #[serde(rename = "Package")]
     pub package: Option<Package>,
-    #[serde(rename = "BaseVersion")]
+    #[serde(rename = "BaseVersion", default)]
     pub baseversion: Vec<BaseVersion>,
 }
 
@@ -45,11 +45,11 @@ pub struct Res {
     pub md5: String,
     #[serde(rename = "@blockSize")]
     pub blocksize: Option<u8>,
-    #[serde(rename = "Block")]
+    #[serde(rename = "Block", default)]
     pub block: Vec<Block>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Block {
     #[serde(rename = "@index")]
     pub index: u8,
@@ -77,7 +77,7 @@ pub struct Pak {
     pub entry: Vec<Entry>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Entry {
     #[serde(rename = "@name")]
     pub name: String,
@@ -95,12 +95,12 @@ pub struct Entry {
 
 #[derive(Deserialize)]
 pub struct BaseVersion {
-    #[serde(rename = "@version")]
-    pub version: Version,
-    #[serde(rename = "@tag")]
-    pub tag: String,
-    #[serde(rename = "ResList")]
-    pub reslist: ResList,
+    #[serde(rename = "@version", default)]
+    pub version: Option<Version>,
+    #[serde(rename = "@tag", default)]
+    pub tag: Option<String>,
+    #[serde(rename = "ResList", default)]
+    pub reslist: Option<Box<ResList>>,
 }
 
 #[derive(Deserialize)]
@@ -133,12 +133,14 @@ pub struct Section {
     pub patch: Vec<Patch>,
 }
 
+#[derive(Clone)]
 pub enum TaskType {
     Normal,
     Block { blocks: Vec<Block> },
     Pak { entries: Vec<Entry> },
 }
 
+#[derive(Clone)]
 pub struct ResTask {
     pub target_path: String,
     pub filesize: u64,

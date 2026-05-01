@@ -1,7 +1,7 @@
 use crate::cas::BucketManager;
 use crate::error::Error;
 use crate::model::{ResTask, TaskType};
-use crate::retry;
+use crate::{retry, verify};
 use futures_util::StreamExt;
 use reqwest::{header::RANGE, Client};
 use std::path::PathBuf;
@@ -51,24 +51,26 @@ impl Downloader {
                         let pak_symlink_target = game_dir.join(format!(".pak_cache/{}.pak", task.md5));
                         cas_mgr.sync_file(&url, &pak_symlink_target, &task.md5, task.filesize, prog.clone()).await?;
 
-                        let pak_bucket_path = cas_mgr.bucket_dir.join(format!("{}.{}", task.md5, task.filesize));
+                        let pak_bucket_path = cas_mgr.get_bucket_path(&task.md5, task.filesize);
                         let mut pak_file = fs::File::open(&pak_bucket_path).await?;
 
                         for entry in entries {
                             let entry_target = game_dir.join(&entry.name);
-                            let entry_bucket_filename = format!("{}.{}", entry.md5, entry.size);
-                            let entry_bucket_path = cas_mgr.bucket_dir.join(&entry_bucket_filename);
+                            let entry_bucket_path = cas_mgr.get_bucket_path(&entry.md5, entry.size);
 
                             if let Some(parent) = entry_target.parent() {
                                 fs::create_dir_all(parent).await?;
                             }
 
                             if !entry_bucket_path.exists() {
-                                let tmp_path = cas_mgr.bucket_dir.join(format!("tmp.{}", entry_bucket_filename));
+                                if let Some(parent) = entry_bucket_path.parent() {
+                                    fs::create_dir_all(parent).await?;
+                                }
+                                let tmp_path = cas_mgr.get_tmp_path(&entry.md5, entry.size);
                                 let mut out_file = fs::File::create(&tmp_path).await?;
 
                                 pak_file.seek(SeekFrom::Start(entry.offset)).await?;
-                                let mut chunk = pak_file.take(entry.size);
+                                let mut chunk = (&mut pak_file).take(entry.size);
                                 tokio::io::copy(&mut chunk, &mut out_file).await?;
                                 out_file.flush().await?;
 
@@ -85,16 +87,16 @@ impl Downloader {
 
                     TaskType::Block { blocks } => {
                         let target_path = game_dir.join(&task.target_path);
-                        let bucket_filename = format!("{}.{}", task.md5, task.filesize);
-                        let bucket_path = cas_mgr.bucket_dir.join(&bucket_filename);
-                        let tmp_path = cas_mgr.bucket_dir.join(format!("tmp.{}", bucket_filename));
+                        let bucket_path = cas_mgr.get_bucket_path(&task.md5, task.filesize);
+                        let tmp_path = cas_mgr.get_tmp_path(&task.md5, task.filesize);
 
                         if bucket_path.exists() {
                             prog(task.filesize);
                         } else {
                             if let Some(parent) = target_path.parent() { fs::create_dir_all(parent).await?; }
+                            if let Some(parent) = bucket_path.parent() { fs::create_dir_all(parent).await?; }
 
-                            let mut file = fs::OpenOptions::new().write(true).read(true).create(true).open(&tmp_path).await?;
+                            let mut file = fs::OpenOptions::new().write(true).read(true).create(true).truncate(false).open(&tmp_path).await?;
                             if file.metadata().await?.len() != task.filesize {
                                 file.set_len(task.filesize).await?;
                             }
@@ -102,7 +104,7 @@ impl Downloader {
                             for block in blocks {
                                 let range_header = format!("bytes={}-{}", block.start, block.start + block.size - 1);
 
-                                let mut response = client.get(&url)
+                                let response = client.get(&url)
                                     .header(RANGE, range_header)
                                     .send().await?.error_for_status()?;
 
@@ -116,6 +118,15 @@ impl Downloader {
                                 }
                             }
                             file.flush().await?;
+                            drop(file);
+
+                            if !verify::check_file_md5(&tmp_path, &task.md5).await? {
+                                let _ = fs::remove_file(&tmp_path).await;
+                                return Err(Error::Md5Mismatch {
+                                    expected: task.md5.clone(),
+                                    actual: String::from("unknown (block validation)"),
+                                });
+                            }
 
                             fs::rename(&tmp_path, &bucket_path).await?;
                         }

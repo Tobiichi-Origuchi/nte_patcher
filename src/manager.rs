@@ -15,6 +15,7 @@ pub struct DownloadManager {
 impl DownloadManager {
     pub fn new(base_url: &str, bucket_dir: PathBuf, game_dir: PathBuf, max_concurrent: usize) -> Self {
         let client = Client::builder()
+            .user_agent("nte_patcher/0.1")
             .tcp_keepalive(std::time::Duration::from_secs(60))
             .build()
             .unwrap();
@@ -57,7 +58,7 @@ impl DownloadManager {
         .buffer_unordered(self.max_concurrent_tasks);
 
         while let Some(result) = stream.next().await {
-            result;
+            result.map_err(|e| Error::Io(std::io::Error::other(e.to_string())))??;
         }
 
         let _ = progress_task.await;

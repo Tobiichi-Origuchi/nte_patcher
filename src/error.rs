@@ -16,4 +16,6 @@ pub enum Error {
     InvalidPayload,
     #[error("Invalid or corrupted PKCS7 padding")]
     InvalidPadding,
+    #[error("MD5 mismatch! Expected {expected}, got {actual}")]
+    Md5Mismatch { expected: String, actual: String },
 }
