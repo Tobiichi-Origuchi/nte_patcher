@@ -83,7 +83,9 @@ impl Downloader {
                                     fs::create_dir_all(parent).await?;
                                 }
                                 let tmp_path = cas_mgr.get_tmp_path(&entry.md5, entry.size);
-                                let mut out_file = fs::File::create(&tmp_path).await?;
+                                let raw_out_file = fs::File::create(&tmp_path).await?;
+                                let mut out_file =
+                                    tokio::io::BufWriter::with_capacity(65536, raw_out_file);
 
                                 pak_file.seek(SeekFrom::Start(entry.offset)).await?;
                                 let mut chunk = (&mut pak_file).take(entry.size);
@@ -118,7 +120,7 @@ impl Downloader {
                                 fs::create_dir_all(parent).await?;
                             }
 
-                            let mut file = fs::OpenOptions::new()
+                            let file = fs::OpenOptions::new()
                                 .write(true)
                                 .read(true)
                                 .create(true)
@@ -128,32 +130,66 @@ impl Downloader {
                             if file.metadata().await?.len() != task.filesize {
                                 file.set_len(task.filesize).await?;
                             }
-
-                            for block in blocks {
-                                let range_header = format!(
-                                    "bytes={}-{}",
-                                    block.start,
-                                    block.start + block.size - 1
-                                );
-
-                                let response = client
-                                    .get(&url)
-                                    .header(RANGE, range_header)
-                                    .send()
-                                    .await?
-                                    .error_for_status()?;
-
-                                file.seek(SeekFrom::Start(block.start)).await?;
-                                let mut stream = response.bytes_stream();
-
-                                while let Some(chunk) = stream.next().await {
-                                    let data = chunk?;
-                                    file.write_all(&data).await?;
-                                    prog(data.len() as u64);
-                                }
-                            }
-                            file.flush().await?;
                             drop(file);
+
+                            let mut stream = futures_util::stream::iter(
+                                blocks.clone().into_iter().map(|block| {
+                                    let tmp_path = tmp_path.clone();
+                                    let client = client.clone();
+                                    let url = url.clone();
+                                    let prog = prog.clone();
+                                    let block = block.clone();
+
+                                    async move {
+                                        if verify::check_slice_md5(
+                                            &tmp_path,
+                                            block.start,
+                                            block.size,
+                                            &block.md5,
+                                        )
+                                        .await
+                                        .unwrap_or(false)
+                                        {
+                                            prog(block.size);
+                                            return Ok::<(), Error>(());
+                                        }
+
+                                        let range_header = format!(
+                                            "bytes={}-{}",
+                                            block.start,
+                                            block.start + block.size - 1
+                                        );
+
+                                        let response = client
+                                            .get(&url)
+                                            .header(RANGE, range_header)
+                                            .send()
+                                            .await?
+                                            .error_for_status()?;
+
+                                        let mut file = fs::OpenOptions::new()
+                                            .write(true)
+                                            .open(&tmp_path)
+                                            .await?;
+
+                                        file.seek(SeekFrom::Start(block.start)).await?;
+                                        let mut stream = response.bytes_stream();
+
+                                        while let Some(chunk) = stream.next().await {
+                                            let data = chunk?;
+                                            file.write_all(&data).await?;
+                                            prog(data.len() as u64);
+                                        }
+                                        file.flush().await?;
+                                        Ok::<(), Error>(())
+                                    }
+                                }),
+                            )
+                            .buffer_unordered(8);
+
+                            while let Some(result) = stream.next().await {
+                                result?;
+                            }
 
                             if !verify::check_file_md5(&tmp_path, &task.md5).await? {
                                 let _ = fs::remove_file(&tmp_path).await;

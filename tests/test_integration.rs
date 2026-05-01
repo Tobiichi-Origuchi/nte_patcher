@@ -8,7 +8,11 @@ use nte_patcher::{
     unzip::extract,
 };
 use reqwest::Url;
-use std::{fs::read, sync::atomic::{AtomicU64, Ordering}, sync::Arc};
+use std::{
+    fs::read,
+    sync::Arc,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use tempfile::tempdir;
 
 async fn download_file(client: &reqwest::Client, url: &str, path: &str) -> Result<(), Error> {
@@ -18,7 +22,9 @@ async fn download_file(client: &reqwest::Client, url: &str, path: &str) -> Resul
     use futures_util::StreamExt;
     while let Some(chunk) = stream.next().await {
         let data = chunk.map_err(Error::Reqwest)?;
-        tokio::io::AsyncWriteExt::write_all(&mut file, &data).await.map_err(Error::Io)?;
+        tokio::io::AsyncWriteExt::write_all(&mut file, &data)
+            .await
+            .map_err(Error::Io)?;
     }
     Ok(())
 }
@@ -40,8 +46,12 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
     let bucket_dir = base_path.join("bucket");
     let game_dir = base_path.join("game");
 
-    tokio::fs::create_dir_all(&bucket_dir).await.map_err(Error::Io)?;
-    tokio::fs::create_dir_all(&game_dir).await.map_err(Error::Io)?;
+    tokio::fs::create_dir_all(&bucket_dir)
+        .await
+        .map_err(Error::Io)?;
+    tokio::fs::create_dir_all(&game_dir)
+        .await
+        .map_err(Error::Io)?;
 
     // 2. Fetch config
     let config_url = Url::parse(&format!("{}/Version/Windows/config.xml", base_url))?;
@@ -54,10 +64,13 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
         base_url, version
     );
     let reslist_zip_path = base_path.join("ResList.bin.zip");
-    let client = reqwest::Client::builder()
-        .build()
-        .map_err(Error::Reqwest)?;
-    download_file(&client, &reslist_zip_url, reslist_zip_path.to_str().unwrap()).await?;
+    let client = reqwest::Client::builder().build().map_err(Error::Reqwest)?;
+    download_file(
+        &client,
+        &reslist_zip_url,
+        reslist_zip_path.to_str().unwrap(),
+    )
+    .await?;
 
     // 4. Extract ResList.bin.zip
     let zip_data = read(&reslist_zip_path)?;
@@ -72,7 +85,10 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
 
     // 6. Verify ResList.xml MD5 against config
     let actual_listhash = compute_md5(reslist_xml_path.to_str().unwrap())?;
-    assert_eq!(config.extra.listhash, actual_listhash, "ResList MD5 mismatch");
+    assert_eq!(
+        config.extra.listhash, actual_listhash,
+        "ResList MD5 mismatch"
+    );
 
     // 7. Parse ResList.xml
     let reslist = get_reslist(&reslist_xml_path)?;
@@ -112,9 +128,11 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
     let downloaded_bytes = Arc::new(AtomicU64::new(0));
     let downloaded_bytes_clone = downloaded_bytes.clone();
 
-    manager.start_all(small_tasks.clone(), move |bytes| {
-        downloaded_bytes_clone.fetch_add(bytes, Ordering::Relaxed);
-    }).await?;
+    manager
+        .start_all(small_tasks.clone(), move |bytes| {
+            downloaded_bytes_clone.fetch_add(bytes, Ordering::Relaxed);
+        })
+        .await?;
 
     // Wait a brief moment to ensure progress channel is fully flushed
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -125,16 +143,29 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
             nte_patcher::model::TaskType::Pak { entries } => {
                 for entry in entries {
                     let target_path = game_dir.join(&entry.name);
-                    assert!(target_path.exists(), "Pak entry {:?} should exist", entry.name);
+                    assert!(
+                        target_path.exists(),
+                        "Pak entry {:?} should exist",
+                        entry.name
+                    );
                 }
             }
             _ => {
                 let target_path = game_dir.join(&task.target_path);
-                assert!(target_path.exists(), "Target file {:?} should exist", task.target_path);
+                assert!(
+                    target_path.exists(),
+                    "Target file {:?} should exist",
+                    task.target_path
+                );
 
                 // Also verify that the size is correct
                 let meta = tokio::fs::metadata(&target_path).await.map_err(Error::Io)?;
-                assert_eq!(meta.len(), task.filesize, "Size mismatch for {:?}", task.target_path);
+                assert_eq!(
+                    meta.len(),
+                    task.filesize,
+                    "Size mismatch for {:?}",
+                    task.target_path
+                );
             }
         }
     }
