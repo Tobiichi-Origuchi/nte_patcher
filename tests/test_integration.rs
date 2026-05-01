@@ -76,13 +76,30 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
 
     // 7. Parse ResList.xml
     let reslist = get_reslist(&reslist_xml_path)?;
-    let mut tasks = ResTask::from_reslist(reslist);
+    let tasks = ResTask::from_reslist(reslist);
     assert!(!tasks.is_empty(), "ResList should contain tasks");
 
     // 8. Test DownloadManager
-    // Sort tasks by size so we only download the absolute smallest ones to avoid long test times.
-    tasks.sort_by_key(|t| t.filesize);
-    let small_tasks: Vec<ResTask> = tasks.into_iter().take(3).collect();
+    let mut normal_tasks = Vec::new();
+    let mut pak_tasks = Vec::new();
+    let mut block_tasks = Vec::new();
+
+    for task in tasks {
+        match task.task_type {
+            nte_patcher::model::TaskType::Normal => normal_tasks.push(task),
+            nte_patcher::model::TaskType::Pak { .. } => pak_tasks.push(task),
+            nte_patcher::model::TaskType::Block { .. } => block_tasks.push(task),
+        }
+    }
+
+    normal_tasks.sort_by_key(|t| t.filesize);
+    pak_tasks.sort_by_key(|t| t.filesize);
+    block_tasks.sort_by_key(|t| t.filesize);
+
+    let mut small_tasks: Vec<ResTask> = normal_tasks.into_iter().take(3).collect();
+    small_tasks.extend(pak_tasks.into_iter().take(1));
+    small_tasks.extend(block_tasks.into_iter().take(1));
+
     let _total_expected_bytes: u64 = small_tasks.iter().map(|t| t.filesize).sum();
 
     let manager = DownloadManager::new(
