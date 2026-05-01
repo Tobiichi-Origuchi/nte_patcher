@@ -37,7 +37,6 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
     // 1. Setup temp dirs
     let temp_dir = tempdir().map_err(Error::Io)?;
     let base_path = temp_dir.path();
-    println!("{:?}", &base_path);
     let bucket_dir = base_path.join("bucket");
     let game_dir = base_path.join("game");
 
