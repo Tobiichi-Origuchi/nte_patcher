@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use std::{
     fs::{File, create_dir_all},
     io::{Cursor, Error, copy},

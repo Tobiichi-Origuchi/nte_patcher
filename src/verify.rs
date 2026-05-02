@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use crate::error::Error;
 use md5::{Digest, Md5};
 use std::path::Path;

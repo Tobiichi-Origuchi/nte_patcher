@@ -1,3 +1,5 @@
+//! The central download management API.
+
 use crate::config::PatcherConfig;
 use crate::download::Downloader;
 use crate::error::Error;
@@ -6,12 +8,23 @@ use futures::stream::{self, StreamExt};
 use reqwest::Client;
 use std::sync::Arc;
 
+/// Coordinates the downloading of multiple tasks using a specified configuration.
 pub struct DownloadManager {
     config: Arc<PatcherConfig>,
     downloader: Arc<Downloader>,
 }
 
 impl DownloadManager {
+    /// Creates a new `DownloadManager` with the provided configuration.
+    ///
+    /// # Example
+    /// ```rust
+    /// use nte_patcher::config::PatcherConfig;
+    /// use nte_patcher::manager::DownloadManager;
+    /// 
+    /// let config = PatcherConfig::default();
+    /// let manager = DownloadManager::new(config);
+    /// ```
     pub fn new(config: PatcherConfig) -> Self {
         let client = Client::builder()
             .tcp_keepalive(std::time::Duration::from_secs(config.tcp_keepalive_secs))
@@ -30,6 +43,7 @@ impl DownloadManager {
         format!("{}/Res/{}/{}.{}", self.config.base_url, shard, md5, size)
     }
 
+    /// Starts all the provided tasks and tracks total progress via the callback.
     pub async fn start_all<F>(&self, tasks: Vec<ResTask>, mut on_progress: F) -> Result<(), Error>
     where
         F: FnMut(u64) + Send + 'static,
@@ -75,4 +89,5 @@ impl DownloadManager {
         Ok(())
     }
 }
+
 

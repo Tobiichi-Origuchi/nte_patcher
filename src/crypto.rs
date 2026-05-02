@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use crate::error::Error;
 use aes::{
     Aes128,

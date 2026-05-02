@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use crate::error::Error;
 use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
