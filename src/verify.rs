@@ -90,3 +90,19 @@ pub async fn check_slice_md5(
 
     Ok(is_match)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_empty_file_md5() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.txt");
+        std::fs::File::create(&path).unwrap();
+        
+        // MD5 of empty string is d41d8cd98f00b204e9800998ecf8427e
+        let res = check_file_md5(&path, "d41d8cd98f00b204e9800998ecf8427e").await.unwrap();
+        assert!(res);
+    }
+}
