@@ -181,7 +181,7 @@ impl BucketManager {
         let final_md5 = hex::encode(hasher.finalize());
         if final_md5 != expected_md5 {
             let _ = fs::remove_file(tmp_path).await;
-            return Err(Error::Md5Mismatch {
+            return Err(Error::Checksum {
                 expected: expected_md5.to_string(),
                 actual: final_md5,
             });

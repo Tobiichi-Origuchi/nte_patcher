@@ -25,7 +25,7 @@ pub fn aes_cbc(
 
     let len = buffer.len();
     if len == 0 || len % 16 != 0 {
-        return Err(Error::InvalidPayload);
+        return Err(Error::Validation("Invalid payload length".to_string()));
     }
 
     let cipher = Aes128::new(key.into());
@@ -46,11 +46,11 @@ pub fn aes_cbc(
 
     let pad_len = buffer[len - 1] as usize;
     if pad_len == 0 || pad_len > 16 {
-        return Err(Error::InvalidPadding);
+        return Err(Error::Validation("Invalid padding".to_string()));
     }
     for &b in &buffer[len - pad_len..] {
         if b as usize != pad_len {
-            return Err(Error::InvalidPadding);
+            return Err(Error::Validation("Invalid padding".to_string()));
         }
     }
     buffer.truncate(len - pad_len);

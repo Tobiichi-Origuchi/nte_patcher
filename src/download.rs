@@ -238,7 +238,7 @@ impl Downloader {
 
                             if !verify::check_file_md5(&tmp_path, &task.md5).await? {
                                 let _ = fs::remove_file(&tmp_path).await;
-                                return Err(Error::Md5Mismatch {
+                                return Err(Error::Checksum {
                                     expected: task.md5.clone(),
                                     actual: String::from("unknown (block validation)"),
                                 });
