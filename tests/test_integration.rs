@@ -21,7 +21,7 @@ async fn download_file(client: &reqwest::Client, url: &str, path: &str) -> Resul
     let mut stream = response.bytes_stream();
     use futures_util::StreamExt;
     while let Some(chunk) = stream.next().await {
-        let data = chunk.map_err(Error::Reqwest)?;
+        let data = chunk.map_err(Error::Network)?;
         tokio::io::AsyncWriteExt::write_all(&mut file, &data)
             .await
             .map_err(Error::Io)?;
@@ -64,7 +64,7 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
         base_url, version
     );
     let reslist_zip_path = base_path.join("ResList.bin.zip");
-    let client = reqwest::Client::builder().build().map_err(Error::Reqwest)?;
+    let client = reqwest::Client::builder().build().map_err(Error::Network)?;
     download_file(
         &client,
         &reslist_zip_url,

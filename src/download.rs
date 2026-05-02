@@ -18,10 +18,164 @@ pub struct Downloader {
 impl Downloader {
     pub fn new(client: Client, config: Arc<PatcherConfig>) -> Self {
         Self {
-            cas_manager: Arc::new(BucketManager::new(client.clone(), config.bucket_dir.clone())),
+            cas_manager: Arc::new(BucketManager::new(config.bucket_dir.clone())),
             client,
             config,
         }
+    }
+
+    pub async fn sync_file<F>(
+        &self,
+        url: &str,
+        target_path: &std::path::Path,
+        expected_md5: &str,
+        expected_size: u64,
+        mut on_progress: F,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(u64),
+    {
+        let bucket_path = self.cas_manager.get_bucket_path(expected_md5, expected_size);
+        let tmp_path = self.cas_manager.get_tmp_path(expected_md5, expected_size);
+
+        if let Some(parent) = bucket_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        if target_path.exists() || fs::symlink_metadata(target_path).await.is_ok() {
+            if let Ok(p) = fs::read_link(target_path).await {
+                let is_same = fs::canonicalize(&p).await.unwrap_or_default()
+                    == fs::canonicalize(&bucket_path).await.unwrap_or_default();
+                if is_same && bucket_path.exists() {
+                    on_progress(expected_size);
+                    return Ok(());
+                }
+            } else {
+                fs::remove_file(target_path).await?;
+            }
+        }
+
+        if !bucket_path.exists() {
+            self.download_to_tmp(
+                url,
+                &tmp_path,
+                expected_md5,
+                expected_size,
+                &mut on_progress,
+            )
+            .await?;
+            fs::rename(&tmp_path, &bucket_path).await?;
+        } else {
+            on_progress(expected_size);
+        }
+
+        crate::cas::create_symlink(&bucket_path, target_path).await?;
+        Ok(())
+    }
+
+    async fn download_to_tmp<F>(
+        &self,
+        url: &str,
+        tmp_path: &std::path::Path,
+        expected_md5: &str,
+        expected_size: u64,
+        on_progress: &mut F,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(u64),
+    {
+        use md5::{Digest, Md5};
+        use tokio::fs::OpenOptions;
+
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(tmp_path)
+            .await?;
+
+        let mut existing_size = file.metadata().await?.len();
+        if existing_size > expected_size {
+            file.set_len(0).await?;
+            existing_size = 0;
+        }
+
+        if existing_size < expected_size {
+            file.set_len(expected_size).await?;
+        }
+
+        let std_file = file.into_std().await;
+        let mmap = tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
+            unsafe { memmap2::MmapMut::map_mut(&std_file) }
+        })
+        .await
+        .unwrap()?;
+
+        let (mut hasher, mut mmap) = if existing_size > 0 {
+            tokio::task::spawn_blocking(move || {
+                let mut h = Md5::new();
+                h.update(&mmap[..(existing_size as usize)]);
+                (h, mmap)
+            })
+            .await
+            .unwrap()
+        } else {
+            (Md5::new(), mmap)
+        };
+
+        if existing_size > 0 {
+            on_progress(existing_size);
+        }
+
+        if existing_size < expected_size {
+            let range_header = format!("bytes={}-", existing_size);
+            let response = self
+                .client
+                .get(url)
+                .header(RANGE, range_header)
+                .send()
+                .await?
+                .error_for_status()?;
+            
+            let mut current_offset = existing_size as usize;
+
+            if response.status() == reqwest::StatusCode::OK {
+                hasher = Md5::new();
+                current_offset = 0;
+                on_progress(0);
+            }
+
+            let mut stream = response.bytes_stream();
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result?;
+                hasher.update(&chunk);
+                
+                let len = chunk.len();
+                mmap[current_offset..current_offset + len].copy_from_slice(&chunk);
+                current_offset += len;
+                
+                on_progress(len as u64);
+            }
+        }
+
+        tokio::task::spawn_blocking(move || mmap.flush()).await.unwrap()?;
+
+        let final_md5 = hex::encode(hasher.finalize());
+        if final_md5 != expected_md5 {
+            let _ = fs::remove_file(tmp_path).await;
+            return Err(Error::Checksum {
+                expected: expected_md5.to_string(),
+                actual: final_md5,
+            });
+        }
+
+        Ok(())
     }
 
     pub async fn execute_task<F>(
@@ -38,10 +192,13 @@ impl Downloader {
         let game_dir = self.config.game_dir.clone();
 
         let highest_reported = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        
+        let this = self.clone();
 
         retry::with_retry(self.config.retry_count, || {
-            let cas_mgr = self.cas_manager.clone();
-            let client = self.client.clone();
+            let this = this.clone();
+            let cas_mgr = this.cas_manager.clone();
+            let client = this.client.clone();
             let url = url_c.clone();
             let task = task_c.clone();
             let game_dir = game_dir.clone();
@@ -80,16 +237,14 @@ impl Downloader {
                 match &task.task_type {
                     TaskType::Normal => {
                         let target_path = game_dir.join(&task.target_path);
-                        cas_mgr
-                            .sync_file(&url, &target_path, &task.md5, task.filesize, prog)
+                        this.sync_file(&url, &target_path, &task.md5, task.filesize, prog)
                             .await?;
                     }
 
                     TaskType::Pak { entries } => {
                         let pak_symlink_target =
                             game_dir.join(format!(".pak_cache/{}.pak", task.md5));
-                        cas_mgr
-                            .sync_file(
+                        this.sync_file(
                                 &url,
                                 &pak_symlink_target,
                                 &task.md5,
