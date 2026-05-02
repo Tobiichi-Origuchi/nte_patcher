@@ -4,6 +4,7 @@ pub mod download;
 pub mod error;
 pub mod manager;
 pub mod model;
+pub mod mmap;
 pub mod parser;
 pub mod retry;
 pub mod unzip;
