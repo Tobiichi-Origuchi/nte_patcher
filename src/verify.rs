@@ -28,7 +28,7 @@ pub async fn check_file_md5(path: &Path, expected_md5: &str) -> Result<bool, Err
         };
 
         if metadata.len() == 0 {
-            let empty_md5 = Md5::digest(&[]);
+            let empty_md5 = Md5::digest([]);
             return Ok(empty_md5.as_slice() == expected_bytes);
         }
 
@@ -72,7 +72,7 @@ pub async fn check_slice_md5(
         }
 
         if size == 0 {
-            let empty_md5 = Md5::digest(&[]);
+            let empty_md5 = Md5::digest([]);
             return Ok(empty_md5.as_slice() == expected_bytes);
         }
 
