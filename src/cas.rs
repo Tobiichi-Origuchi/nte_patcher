@@ -4,7 +4,6 @@ use md5::{Digest, Md5};
 use reqwest::{Client, header::RANGE};
 use std::path::{Path, PathBuf};
 use tokio::fs::{self, OpenOptions};
-use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 
 pub struct BucketManager {
     client: Client,
@@ -123,7 +122,7 @@ impl BucketManager {
         }
 
         let std_file = file.into_std().await;
-        let mut mmap = tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
+        let mmap = tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
             unsafe { memmap2::MmapMut::map_mut(&std_file) }
         })
         .await

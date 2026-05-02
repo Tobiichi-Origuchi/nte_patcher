@@ -7,7 +7,6 @@ use reqwest::{Client, header::RANGE};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
-use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 
 pub struct Downloader {
     client: Client,
@@ -173,7 +172,13 @@ impl Downloader {
                             if file.metadata().await?.len() != task.filesize {
                                 file.set_len(task.filesize).await?;
                             }
-                            drop(file);
+                            let std_file = file.into_std().await;
+                            let mmap = tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
+                                unsafe { memmap2::MmapMut::map_mut(&std_file) }
+                            })
+                            .await
+                            .unwrap()?;
+                            let sync_mmap = std::sync::Arc::new(crate::mmap::SyncMmap::new(mmap));
 
                             let mut stream = futures_util::stream::iter(
                                 blocks.clone().into_iter().map(|block| {
@@ -182,6 +187,7 @@ impl Downloader {
                                     let url = url.clone();
                                     let prog = prog.clone();
                                     let block = block.clone();
+                                    let sync_mmap = sync_mmap.clone();
 
                                     async move {
                                         if verify::check_slice_md5(
@@ -210,20 +216,15 @@ impl Downloader {
                                             .await?
                                             .error_for_status()?;
 
-                                        let mut file = fs::OpenOptions::new()
-                                            .write(true)
-                                            .open(&tmp_path)
-                                            .await?;
-
-                                        file.seek(SeekFrom::Start(block.start)).await?;
+                                        let mut current_offset = block.start as usize;
                                         let mut stream = response.bytes_stream();
 
                                         while let Some(chunk) = stream.next().await {
                                             let data = chunk?;
-                                            file.write_all(&data).await?;
+                                            sync_mmap.write_at(current_offset, &data)?;
+                                            current_offset += data.len();
                                             prog(data.len() as u64);
                                         }
-                                        file.flush().await?;
                                         Ok::<(), Error>(())
                                     }
                                 }),
