@@ -104,8 +104,7 @@ impl BucketManager {
     where
         F: FnMut(u64),
     {
-        let mut hasher = Md5::new();
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
@@ -113,33 +112,38 @@ impl BucketManager {
             .open(tmp_path)
             .await?;
 
-        let existing_size = file.metadata().await?.len();
-        if existing_size > 0 {
-            if existing_size > expected_size {
-                file.set_len(0).await?;
-            } else {
-                let tmp_path_c = tmp_path.to_path_buf();
-                hasher = tokio::task::spawn_blocking(move || -> Result<Md5, std::io::Error> {
-                    let mut std_file = std::fs::File::open(&tmp_path_c)?;
-                    let mut h = Md5::new();
-                    let mut buf = [0u8; 65536];
-                    loop {
-                        let n = std::io::Read::read(&mut std_file, &mut buf)?;
-                        if n == 0 {
-                            break;
-                        }
-                        h.update(&buf[..n]);
-                    }
-                    Ok(h)
-                })
-                .await
-                .unwrap()?;
-                on_progress(existing_size);
-            }
+        let mut existing_size = file.metadata().await?.len();
+        if existing_size > expected_size {
+            file.set_len(0).await?;
+            existing_size = 0;
         }
 
-        file.seek(SeekFrom::End(0)).await?;
-        let existing_size = file.metadata().await?.len();
+        if existing_size < expected_size {
+            file.set_len(expected_size).await?;
+        }
+
+        let std_file = file.into_std().await;
+        let mut mmap = tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
+            unsafe { memmap2::MmapMut::map_mut(&std_file) }
+        })
+        .await
+        .unwrap()?;
+
+        let (mut hasher, mut mmap) = if existing_size > 0 {
+            tokio::task::spawn_blocking(move || {
+                let mut h = Md5::new();
+                h.update(&mmap[..(existing_size as usize)]);
+                (h, mmap)
+            })
+            .await
+            .unwrap()
+        } else {
+            (Md5::new(), mmap)
+        };
+
+        if existing_size > 0 {
+            on_progress(existing_size);
+        }
 
         if existing_size < expected_size {
             let range_header = format!("bytes={}-", existing_size);
@@ -150,27 +154,33 @@ impl BucketManager {
                 .send()
                 .await?
                 .error_for_status()?;
-            // if the server responds with a 200 OK, reset the file and start over
+            
+            let mut current_offset = existing_size as usize;
+
             if response.status() == reqwest::StatusCode::OK {
-                file.set_len(0).await?;
-                file.seek(SeekFrom::Start(0)).await?;
                 hasher = Md5::new();
+                current_offset = 0;
                 on_progress(0);
             }
+
             let mut stream = response.bytes_stream();
 
             while let Some(chunk_result) = stream.next().await {
                 let chunk = chunk_result?;
                 hasher.update(&chunk);
-                file.write_all(&chunk).await?;
-                on_progress(chunk.len() as u64);
+                
+                let len = chunk.len();
+                mmap[current_offset..current_offset + len].copy_from_slice(&chunk);
+                current_offset += len;
+                
+                on_progress(len as u64);
             }
-            file.flush().await?;
         }
+
+        tokio::task::spawn_blocking(move || mmap.flush()).await.unwrap()?;
 
         let final_md5 = hex::encode(hasher.finalize());
         if final_md5 != expected_md5 {
-            drop(file);
             let _ = fs::remove_file(tmp_path).await;
             return Err(Error::Md5Mismatch {
                 expected: expected_md5.to_string(),
