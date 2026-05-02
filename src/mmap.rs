@@ -15,7 +15,11 @@ impl SyncMmap {
     pub fn new(mut mmap: MmapMut) -> Self {
         let ptr = mmap.as_mut_ptr();
         let len = mmap.len();
-        Self { ptr, len, _mmap: mmap }
+        Self {
+            ptr,
+            len,
+            _mmap: mmap,
+        }
     }
 
     pub fn write_at(&self, offset: usize, data: &[u8]) -> Result<()> {

@@ -36,7 +36,9 @@ impl Downloader {
     where
         F: FnMut(u64),
     {
-        let bucket_path = self.cas_manager.get_bucket_path(expected_md5, expected_size);
+        let bucket_path = self
+            .cas_manager
+            .get_bucket_path(expected_md5, expected_size);
         let tmp_path = self.cas_manager.get_tmp_path(expected_md5, expected_size);
 
         if let Some(parent) = bucket_path.parent() {
@@ -111,11 +113,12 @@ impl Downloader {
         }
 
         let std_file = file.into_std().await;
-        let mmap = tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
-            unsafe { memmap2::MmapMut::map_mut(&std_file) }
-        })
-        .await
-        .unwrap()?;
+        let mmap =
+            tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
+                unsafe { memmap2::MmapMut::map_mut(&std_file) }
+            })
+            .await
+            .unwrap()?;
 
         let (mut hasher, mut mmap) = if existing_size > 0 {
             tokio::task::spawn_blocking(move || {
@@ -142,7 +145,7 @@ impl Downloader {
                 .send()
                 .await?
                 .error_for_status()?;
-            
+
             let mut current_offset = existing_size as usize;
 
             if response.status() == reqwest::StatusCode::OK {
@@ -156,16 +159,18 @@ impl Downloader {
             while let Some(chunk_result) = stream.next().await {
                 let chunk = chunk_result?;
                 hasher.update(&chunk);
-                
+
                 let len = chunk.len();
                 mmap[current_offset..current_offset + len].copy_from_slice(&chunk);
                 current_offset += len;
-                
+
                 on_progress(len as u64);
             }
         }
 
-        tokio::task::spawn_blocking(move || mmap.flush()).await.unwrap()?;
+        tokio::task::spawn_blocking(move || mmap.flush())
+            .await
+            .unwrap()?;
 
         let final_md5 = hex::encode(hasher.finalize());
         if final_md5 != expected_md5 {
@@ -193,7 +198,7 @@ impl Downloader {
         let game_dir = self.config.game_dir.clone();
 
         let highest_reported = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        
+
         let this = self.clone();
 
         retry::with_retry(self.config.retry_count, || {
@@ -246,13 +251,13 @@ impl Downloader {
                         let pak_symlink_target =
                             game_dir.join(format!(".pak_cache/{}.pak", task.md5));
                         this.sync_file(
-                                &url,
-                                &pak_symlink_target,
-                                &task.md5,
-                                task.filesize,
-                                prog.clone(),
-                            )
-                            .await?;
+                            &url,
+                            &pak_symlink_target,
+                            &task.md5,
+                            task.filesize,
+                            prog.clone(),
+                        )
+                        .await?;
 
                         let pak_bucket_path = cas_mgr.get_bucket_path(&task.md5, task.filesize);
 
@@ -330,9 +335,11 @@ impl Downloader {
                                 file.set_len(task.filesize).await?;
                             }
                             let std_file = file.into_std().await;
-                            let mmap = tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
-                                unsafe { memmap2::MmapMut::map_mut(&std_file) }
-                            })
+                            let mmap = tokio::task::spawn_blocking(
+                                move || -> Result<memmap2::MmapMut, std::io::Error> {
+                                    unsafe { memmap2::MmapMut::map_mut(&std_file) }
+                                },
+                            )
                             .await
                             .unwrap()?;
                             let sync_mmap = std::sync::Arc::new(crate::mmap::SyncMmap::new(mmap));

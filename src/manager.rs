@@ -21,7 +21,7 @@ impl DownloadManager {
     /// ```rust
     /// use nte_patcher::config::PatcherConfig;
     /// use nte_patcher::manager::DownloadManager;
-    /// 
+    ///
     /// let config = PatcherConfig::default();
     /// let manager = DownloadManager::new(config);
     /// ```
@@ -76,7 +76,8 @@ impl DownloadManager {
 
         drop(tx);
 
-        let mut stream = stream::iter(stream_iter).buffer_unordered(self.config.max_concurrent_tasks);
+        let mut stream =
+            stream::iter(stream_iter).buffer_unordered(self.config.max_concurrent_tasks);
 
         while let Some(result) = stream.next().await {
             result?;
@@ -89,5 +90,3 @@ impl DownloadManager {
         Ok(())
     }
 }
-
-

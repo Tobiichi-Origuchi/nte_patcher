@@ -73,13 +73,13 @@ mod tests {
     fn test_invalid_payload_length() {
         let key = [0u8; 16];
         let iv = [0u8; 16];
-        
+
         let origin = NamedTempFile::new().unwrap();
         let target = NamedTempFile::new().unwrap();
-        
+
         let mut file = std::fs::File::create(origin.path()).unwrap();
         file.write_all(&[1, 2, 3]).unwrap(); // Invalid length
-        
+
         let res = aes_cbc(origin.path(), target.path(), &key, &iv);
         assert!(matches!(res, Err(Error::Validation(_))));
     }

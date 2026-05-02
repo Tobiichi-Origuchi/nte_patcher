@@ -22,7 +22,7 @@ pub async fn check_file_md5(path: &Path, expected_md5: &str) -> Result<bool, Err
             Ok(f) => f,
             Err(_) => return Ok(false),
         };
-        
+
         let metadata = match file.metadata() {
             Ok(m) => m,
             Err(_) => return Ok(false),
@@ -78,10 +78,13 @@ pub async fn check_slice_md5(
         }
 
         // SAFETY: Mapping specific slice of file. External modification risk accepted.
-        let mmap = unsafe { 
-            memmap2::MmapOptions::new().offset(start).len(size as usize).map(&file)? 
+        let mmap = unsafe {
+            memmap2::MmapOptions::new()
+                .offset(start)
+                .len(size as usize)
+                .map(&file)?
         };
-        
+
         let hash = Md5::digest(&mmap);
         Ok(hash.as_slice() == expected_bytes)
     })
@@ -100,9 +103,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("empty.txt");
         std::fs::File::create(&path).unwrap();
-        
+
         // MD5 of empty string is d41d8cd98f00b204e9800998ecf8427e
-        let res = check_file_md5(&path, "d41d8cd98f00b204e9800998ecf8427e").await.unwrap();
+        let res = check_file_md5(&path, "d41d8cd98f00b204e9800998ecf8427e")
+            .await
+            .unwrap();
         assert!(res);
     }
 }
