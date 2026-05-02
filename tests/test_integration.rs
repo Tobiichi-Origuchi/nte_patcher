@@ -118,12 +118,16 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
 
     let _total_expected_bytes: u64 = small_tasks.iter().map(|t| t.filesize).sum();
 
-    let manager = DownloadManager::new(
-        base_url,
-        bucket_dir.clone(),
-        game_dir.clone(),
-        4, // max_concurrent
-    );
+    let config = nte_patcher::config::PatcherConfig {
+        base_url: base_url.to_string(),
+        bucket_dir: bucket_dir.clone(),
+        game_dir: game_dir.clone(),
+        max_concurrent_tasks: 4,
+        retry_count: 3,
+        tcp_keepalive_secs: 60,
+    };
+    
+    let manager = DownloadManager::new(config);
 
     let downloaded_bytes = Arc::new(AtomicU64::new(0));
     let downloaded_bytes_clone = downloaded_bytes.clone();

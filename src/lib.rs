@@ -1,4 +1,5 @@
 pub mod cas;
+pub mod config;
 pub mod crypto;
 pub mod download;
 pub mod error;

@@ -1,25 +1,26 @@
 use crate::cas::BucketManager;
+use crate::config::PatcherConfig;
 use crate::error::Error;
 use crate::model::{ResTask, TaskType};
 use crate::{retry, verify};
 use futures_util::StreamExt;
 use reqwest::{Client, header::RANGE};
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 
+#[derive(Clone)]
 pub struct Downloader {
     client: Client,
     cas_manager: Arc<BucketManager>,
-    game_dir: PathBuf,
+    config: Arc<PatcherConfig>,
 }
 
 impl Downloader {
-    pub fn new(client: Client, bucket_dir: PathBuf, game_dir: PathBuf) -> Self {
+    pub fn new(client: Client, config: Arc<PatcherConfig>) -> Self {
         Self {
-            cas_manager: Arc::new(BucketManager::new(client.clone(), bucket_dir)),
+            cas_manager: Arc::new(BucketManager::new(client.clone(), config.bucket_dir.clone())),
             client,
-            game_dir,
+            config,
         }
     }
 
@@ -34,11 +35,11 @@ impl Downloader {
     {
         let url_c = url.to_string();
         let task_c = task.clone();
-        let game_dir = self.game_dir.clone();
+        let game_dir = self.config.game_dir.clone();
 
         let highest_reported = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
-        retry::with_retry(3, || {
+        retry::with_retry(self.config.retry_count, || {
             let cas_mgr = self.cas_manager.clone();
             let client = self.client.clone();
             let url = url_c.clone();

@@ -1,39 +1,33 @@
+use crate::config::PatcherConfig;
 use crate::download::Downloader;
 use crate::error::Error;
 use crate::model::ResTask;
 use futures::stream::{self, StreamExt};
 use reqwest::Client;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 pub struct DownloadManager {
-    base_url: String,
+    config: Arc<PatcherConfig>,
     downloader: Arc<Downloader>,
-    max_concurrent_tasks: usize,
 }
 
 impl DownloadManager {
-    pub fn new(
-        base_url: &str,
-        bucket_dir: PathBuf,
-        game_dir: PathBuf,
-        max_concurrent: usize,
-    ) -> Self {
+    pub fn new(config: PatcherConfig) -> Self {
         let client = Client::builder()
-            .tcp_keepalive(std::time::Duration::from_secs(60))
+            .tcp_keepalive(std::time::Duration::from_secs(config.tcp_keepalive_secs))
             .build()
             .unwrap();
 
+        let config = Arc::new(config);
         Self {
-            base_url: base_url.to_string(),
-            downloader: Arc::new(Downloader::new(client, bucket_dir, game_dir)),
-            max_concurrent_tasks: max_concurrent,
+            config: config.clone(),
+            downloader: Arc::new(Downloader::new(client, config)),
         }
     }
 
     fn build_url(&self, md5: &str, size: u64) -> String {
         let shard = md5.get(0..1).unwrap_or("0");
-        format!("{}/Res/{}/{}.{}", self.base_url, shard, md5, size)
+        format!("{}/Res/{}/{}.{}", self.config.base_url, shard, md5, size)
     }
 
     pub async fn start_all<F>(&self, tasks: Vec<ResTask>, mut on_progress: F) -> Result<(), Error>
@@ -68,7 +62,7 @@ impl DownloadManager {
 
         drop(tx);
 
-        let mut stream = stream::iter(stream_iter).buffer_unordered(self.max_concurrent_tasks);
+        let mut stream = stream::iter(stream_iter).buffer_unordered(self.config.max_concurrent_tasks);
 
         while let Some(result) = stream.next().await {
             result?;
@@ -81,3 +75,4 @@ impl DownloadManager {
         Ok(())
     }
 }
+
