@@ -1,7 +1,7 @@
 #![warn(missing_docs)]
 //! NTE Patcher SDK
-//! 
-//! A high-performance, concurrent downloading and patching SDK for game assets.
+//!
+//! A high-performance, concurrent downloading and patching SDK for NTE game assets.
 
 pub mod cas;
 pub mod config;

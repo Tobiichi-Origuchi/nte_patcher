@@ -37,7 +37,6 @@ fn compute_md5(file_path: &str) -> Result<String, Error> {
 }
 
 #[tokio::test]
-#[ignore = "requires external network"]
 async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
     let base_url = "https://ntecdn1.perfectworld.com/clientRes/publish_PC";
 
@@ -127,7 +126,7 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
         retry_count: 3,
         tcp_keepalive_secs: 60,
     };
-    
+
     let manager = DownloadManager::new(config);
 
     let downloaded_bytes = Arc::new(AtomicU64::new(0));
