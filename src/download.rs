@@ -44,14 +44,13 @@ impl Downloader {
     async fn lock_md5(&self, md5: &str) -> Md5Guard {
         loop {
             {
-                if let Ok(mut active) = self.active_downloads.lock() {
-                    if active.insert(md5.to_string()) {
+                if let Ok(mut active) = self.active_downloads.lock()
+                    && active.insert(md5.to_string()) {
                         return Md5Guard {
                             md5: md5.to_string(),
                             active: self.active_downloads.clone(),
                         };
                     }
-                }
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
@@ -131,7 +130,7 @@ impl Downloader {
         use md5::{Digest, Md5};
         use tokio::fs::OpenOptions;
 
-        let file = OpenOptions::new()
+        let mut file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
@@ -149,65 +148,118 @@ impl Downloader {
             file.set_len(expected_size).await?;
         }
 
-        let std_file = file.into_std().await;
-        let mmap =
-            tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
-                unsafe { memmap2::MmapMut::map_mut(&std_file) }
-            })
-            .await
-            .unwrap()?;
+        #[cfg(feature = "mmap")]
+        let mut hasher = {
+            let std_file = file.into_std().await;
+            let mut mmap =
+                tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
+                    unsafe { memmap2::MmapMut::map_mut(&std_file) }
+                })
+                .await
+                .unwrap()?;
 
-        let (mut hasher, mut mmap) = if existing_size > 0 {
-            tokio::task::spawn_blocking(move || {
+            let mut hasher = if existing_size > 0 {
                 let mut h = Md5::new();
                 h.update(&mmap[..(existing_size as usize)]);
-                (h, mmap)
-            })
-            .await
-            .unwrap()
-        } else {
-            (Md5::new(), mmap)
+                h
+            } else {
+                Md5::new()
+            };
+
+            if existing_size > 0 {
+                on_progress(existing_size);
+            }
+
+            if existing_size < expected_size {
+                let range_header = format!("bytes={}-", existing_size);
+                let response = self
+                    .client
+                    .get(url)
+                    .header(RANGE, range_header)
+                    .send()
+                    .await?
+                    .error_for_status()?;
+
+                let mut current_offset = existing_size as usize;
+
+                if response.status() == reqwest::StatusCode::OK {
+                    hasher = Md5::new();
+                    current_offset = 0;
+                    on_progress(0);
+                }
+
+                let mut stream = response.bytes_stream();
+
+                while let Some(chunk_result) = stream.next().await {
+                    let chunk = chunk_result?;
+                    hasher.update(&chunk);
+
+                    let len = chunk.len();
+                    mmap[current_offset..current_offset + len].copy_from_slice(&chunk);
+                    current_offset += len;
+
+                    on_progress(len as u64);
+                }
+            }
+
+            tokio::task::spawn_blocking(move || mmap.flush())
+                .await
+                .unwrap()?;
+            hasher
         };
 
-        if existing_size > 0 {
-            on_progress(existing_size);
-        }
+        #[cfg(not(feature = "mmap"))]
+        let hasher = {
+            use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
-        if existing_size < expected_size {
-            let range_header = format!("bytes={}-", existing_size);
-            let response = self
-                .client
-                .get(url)
-                .header(RANGE, range_header)
-                .send()
-                .await?
-                .error_for_status()?;
+            let mut hasher = Md5::new();
 
-            let mut current_offset = existing_size as usize;
-
-            if response.status() == reqwest::StatusCode::OK {
-                hasher = Md5::new();
-                current_offset = 0;
-                on_progress(0);
+            if existing_size > 0 {
+                file.seek(std::io::SeekFrom::Start(0)).await?;
+                let mut buf = vec![0u8; 65536];
+                let mut remaining = existing_size;
+                while remaining > 0 {
+                    let to_read = std::cmp::min(remaining, buf.len() as u64) as usize;
+                    let n = file.read(&mut buf[..to_read]).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    hasher.update(&buf[..n]);
+                    remaining -= n as u64;
+                }
+                on_progress(existing_size);
             }
 
-            let mut stream = response.bytes_stream();
+            if existing_size < expected_size {
+                let range_header = format!("bytes={}-", existing_size);
+                let response = self
+                    .client
+                    .get(url)
+                    .header(RANGE, range_header)
+                    .send()
+                    .await?
+                    .error_for_status()?;
 
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = chunk_result?;
-                hasher.update(&chunk);
+                if response.status() == reqwest::StatusCode::OK {
+                    hasher = Md5::new();
+                    file.seek(std::io::SeekFrom::Start(0)).await?;
+                    on_progress(0);
+                } else {
+                    file.seek(std::io::SeekFrom::Start(existing_size)).await?;
+                }
 
-                let len = chunk.len();
-                mmap[current_offset..current_offset + len].copy_from_slice(&chunk);
-                current_offset += len;
-
-                on_progress(len as u64);
+                let mut stream = response.bytes_stream();
+                while let Some(chunk_result) = stream.next().await {
+                    let chunk = chunk_result?;
+                    hasher.update(&chunk);
+                    file.write_all(&chunk).await?;
+                    on_progress(chunk.len() as u64);
+                }
             }
-        }
 
-        tokio::task::spawn_blocking(move || mmap.flush())
-            .await
-            .unwrap()?;
+            file.flush().await?;
+            hasher
+        };
 
         let final_md5 = hex::encode(hasher.finalize());
         if final_md5 != expected_md5 {
@@ -379,15 +431,21 @@ impl Downloader {
                                     file.set_len(task.filesize).await?;
                                 }
                                 let std_file = file.into_std().await;
-                                let mmap = tokio::task::spawn_blocking(
-                                    move || -> Result<memmap2::MmapMut, std::io::Error> {
-                                        unsafe { memmap2::MmapMut::map_mut(&std_file) }
-                                    },
-                                )
-                                .await
-                                .unwrap()?;
-                                let sync_mmap =
-                                    std::sync::Arc::new(crate::mmap::SyncMmap::new(mmap));
+                                
+                                #[cfg(feature = "mmap")]
+                                let sync_mmap = {
+                                    let mmap = tokio::task::spawn_blocking(
+                                        move || -> Result<memmap2::MmapMut, std::io::Error> {
+                                            unsafe { memmap2::MmapMut::map_mut(&std_file) }
+                                        },
+                                    )
+                                    .await
+                                    .unwrap()?;
+                                    std::sync::Arc::new(crate::mmap::SyncMmap::new(mmap))
+                                };
+                                
+                                #[cfg(not(feature = "mmap"))]
+                                let sync_mmap = std::sync::Arc::new(crate::mmap::SyncMmap::new(std_file, task.filesize as usize));
 
                                 let mut stream = futures_util::stream::iter(
                                     blocks.clone().into_iter().map(|block| {
