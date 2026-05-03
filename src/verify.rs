@@ -18,7 +18,14 @@ pub async fn check_file_md5(path: &Path, expected_md5: &str) -> Result<bool, Err
     let path_buf = path.to_path_buf();
 
     let is_match = tokio::task::spawn_blocking(move || -> Result<bool, std::io::Error> {
+        #[cfg(not(feature = "mmap"))]
         let mut file = match std::fs::File::open(&path_buf) {
+            Ok(f) => f,
+            Err(_) => return Ok(false),
+        };
+
+        #[cfg(feature = "mmap")]
+        let file = match std::fs::File::open(&path_buf) {
             Ok(f) => f,
             Err(_) => return Ok(false),
         };
@@ -76,7 +83,14 @@ pub async fn check_slice_md5(
     let path_buf = path.to_path_buf();
 
     let is_match = tokio::task::spawn_blocking(move || -> Result<bool, std::io::Error> {
+        #[cfg(not(feature = "mmap"))]
         let mut file = match std::fs::File::open(&path_buf) {
+            Ok(f) => f,
+            Err(_) => return Ok(false),
+        };
+
+        #[cfg(feature = "mmap")]
+        let file = match std::fs::File::open(&path_buf) {
             Ok(f) => f,
             Err(_) => return Ok(false),
         };

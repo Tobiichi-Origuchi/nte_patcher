@@ -131,7 +131,17 @@ impl Downloader {
         use md5::{Digest, Md5};
         use tokio::fs::OpenOptions;
 
+        #[cfg(not(feature = "mmap"))]
         let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(tmp_path)
+            .await?;
+
+        #[cfg(feature = "mmap")]
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
@@ -150,7 +160,7 @@ impl Downloader {
         }
 
         #[cfg(feature = "mmap")]
-        let mut hasher = {
+        let hasher = {
             let std_file = file.into_std().await;
             let mut mmap =
                 tokio::task::spawn_blocking(move || -> Result<memmap2::MmapMut, std::io::Error> {
