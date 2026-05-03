@@ -4,7 +4,7 @@ use crate::config::PatcherConfig;
 use crate::download::Downloader;
 use crate::error::Error;
 use crate::model::ResTask;
-use futures::stream::{self, StreamExt};
+use futures_util::stream::{self, StreamExt};
 use reqwest::Client;
 use std::sync::Arc;
 
@@ -43,38 +43,35 @@ impl DownloadManager {
         format!("{}/Res/{}/{}.{}", self.config.base_url, shard, md5, size)
     }
 
-    /// Starts all the provided tasks and tracks total progress via the callback.
-    pub async fn start_all<F>(&self, tasks: Vec<ResTask>, mut on_progress: F) -> Result<(), Error>
+    /// Starts all the provided tasks.
+    ///
+    /// `task_handler` is invoked just before each task is polled (subject to `max_concurrent_tasks`).
+    /// It should return a tuple containing two closures:
+    /// 1. A progress closure `P` called during the download with the number of bytes downloaded.
+    /// 2. A finish closure `F` called when the task completes.
+    pub async fn start_all<T, P, F>(
+        &self,
+        tasks: Vec<ResTask>,
+        task_handler: T,
+    ) -> Result<(), Error>
     where
-        F: FnMut(u64) + Send + 'static,
+        T: Fn(&ResTask) -> (P, F) + Send + Sync + 'static,
+        P: Fn(u64) + Send + Sync + Clone + 'static,
+        F: FnOnce() + Send + 'static,
     {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<u64>();
+        let task_handler = Arc::new(task_handler);
+        let stream_iter = tasks.into_iter().map(|task| {
+            let downloader = self.downloader.clone();
+            let url = self.build_url(&task.md5, task.filesize);
+            let handler = task_handler.clone();
 
-        let progress_task = tokio::spawn(async move {
-            while let Some(bytes) = rx.recv().await {
-                on_progress(bytes);
+            async move {
+                let (progress_cb, finish_cb) = handler(&task);
+                let res = downloader.execute_task(&url, &task, progress_cb).await;
+                finish_cb();
+                res
             }
         });
-
-        let stream_iter = tasks.into_iter().map({
-            let base_tx = tx.clone();
-            move |task| {
-                let downloader = self.downloader.clone();
-                let url = self.build_url(&task.md5, task.filesize);
-
-                let task_tx = base_tx.clone();
-
-                async move {
-                    downloader
-                        .execute_task(&url, &task, move |bytes| {
-                            let _ = task_tx.send(bytes);
-                        })
-                        .await
-                }
-            }
-        });
-
-        drop(tx);
 
         let mut stream =
             stream::iter(stream_iter).buffer_unordered(self.config.max_concurrent_tasks);
@@ -82,10 +79,6 @@ impl DownloadManager {
         while let Some(result) = stream.next().await {
             result?;
         }
-
-        drop(stream);
-
-        let _ = progress_task.await;
 
         Ok(())
     }

@@ -6,14 +6,29 @@ use crate::model::{ResTask, TaskType};
 use crate::{retry, verify};
 use futures_util::StreamExt;
 use reqwest::{Client, header::RANGE};
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::fs;
+
+struct Md5Guard {
+    md5: String,
+    active: Arc<StdMutex<HashSet<String>>>,
+}
+
+impl Drop for Md5Guard {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(&self.md5);
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Downloader {
     client: Client,
     cas_manager: Arc<BucketManager>,
     config: Arc<PatcherConfig>,
+    active_downloads: Arc<StdMutex<HashSet<String>>>,
 }
 
 impl Downloader {
@@ -22,6 +37,23 @@ impl Downloader {
             cas_manager: Arc::new(BucketManager::new(config.bucket_dir.clone())),
             client,
             config,
+            active_downloads: Arc::new(StdMutex::new(HashSet::new())),
+        }
+    }
+
+    async fn lock_md5(&self, md5: &str) -> Md5Guard {
+        loop {
+            {
+                if let Ok(mut active) = self.active_downloads.lock() {
+                    if active.insert(md5.to_string()) {
+                        return Md5Guard {
+                            md5: md5.to_string(),
+                            active: self.active_downloads.clone(),
+                        };
+                    }
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
     }
 
@@ -63,15 +95,20 @@ impl Downloader {
         }
 
         if !bucket_path.exists() {
-            self.download_to_tmp(
-                url,
-                &tmp_path,
-                expected_md5,
-                expected_size,
-                &mut on_progress,
-            )
-            .await?;
-            fs::rename(&tmp_path, &bucket_path).await?;
+            let _guard = self.lock_md5(expected_md5).await;
+            if !bucket_path.exists() {
+                self.download_to_tmp(
+                    url,
+                    &tmp_path,
+                    expected_md5,
+                    expected_size,
+                    &mut on_progress,
+                )
+                .await?;
+                fs::rename(&tmp_path, &bucket_path).await?;
+            } else {
+                on_progress(expected_size);
+            }
         } else {
             on_progress(expected_size);
         }
@@ -270,33 +307,36 @@ impl Downloader {
                             }
 
                             if !entry_bucket_path.exists() {
-                                if let Some(parent) = entry_bucket_path.parent() {
-                                    fs::create_dir_all(parent).await?;
+                                let _guard = this.lock_md5(&entry.md5).await;
+                                if !entry_bucket_path.exists() {
+                                    if let Some(parent) = entry_bucket_path.parent() {
+                                        fs::create_dir_all(parent).await?;
+                                    }
+                                    let tmp_path = cas_mgr.get_tmp_path(&entry.md5, entry.size);
+                                    let pak_path_c = pak_bucket_path.clone();
+                                    let tmp_path_c = tmp_path.clone();
+                                    let offset = entry.offset;
+                                    let size = entry.size;
+
+                                    tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+                                        use std::io::{Read, Seek, SeekFrom, Write};
+                                        let mut p_file = std::fs::File::open(&pak_path_c)?;
+                                        p_file.seek(SeekFrom::Start(offset))?;
+                                        let mut chunk = p_file.take(size);
+
+                                        let t_file = std::fs::File::create(&tmp_path_c)?;
+                                        let mut buf_writer =
+                                            std::io::BufWriter::with_capacity(65536, t_file);
+
+                                        std::io::copy(&mut chunk, &mut buf_writer)?;
+                                        buf_writer.flush()?;
+                                        Ok(())
+                                    })
+                                    .await
+                                    .unwrap()?;
+
+                                    fs::rename(&tmp_path, &entry_bucket_path).await?;
                                 }
-                                let tmp_path = cas_mgr.get_tmp_path(&entry.md5, entry.size);
-                                let pak_path_c = pak_bucket_path.clone();
-                                let tmp_path_c = tmp_path.clone();
-                                let offset = entry.offset;
-                                let size = entry.size;
-
-                                tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-                                    use std::io::{Read, Seek, SeekFrom, Write};
-                                    let mut p_file = std::fs::File::open(&pak_path_c)?;
-                                    p_file.seek(SeekFrom::Start(offset))?;
-                                    let mut chunk = p_file.take(size);
-
-                                    let t_file = std::fs::File::create(&tmp_path_c)?;
-                                    let mut buf_writer =
-                                        std::io::BufWriter::with_capacity(65536, t_file);
-
-                                    std::io::copy(&mut chunk, &mut buf_writer)?;
-                                    buf_writer.flush()?;
-                                    Ok(())
-                                })
-                                .await
-                                .unwrap()?;
-
-                                fs::rename(&tmp_path, &entry_bucket_path).await?;
                             }
 
                             let _ = fs::remove_file(&entry_target).await;
@@ -317,97 +357,103 @@ impl Downloader {
                         if bucket_path.exists() {
                             prog(task.filesize);
                         } else {
-                            if let Some(parent) = target_path.parent() {
-                                fs::create_dir_all(parent).await?;
-                            }
-                            if let Some(parent) = bucket_path.parent() {
-                                fs::create_dir_all(parent).await?;
-                            }
+                            let _guard = this.lock_md5(&task.md5).await;
+                            if bucket_path.exists() {
+                                prog(task.filesize);
+                            } else {
+                                if let Some(parent) = target_path.parent() {
+                                    fs::create_dir_all(parent).await?;
+                                }
+                                if let Some(parent) = bucket_path.parent() {
+                                    fs::create_dir_all(parent).await?;
+                                }
 
-                            let file = fs::OpenOptions::new()
-                                .write(true)
-                                .read(true)
-                                .create(true)
-                                .truncate(false)
-                                .open(&tmp_path)
-                                .await?;
-                            if file.metadata().await?.len() != task.filesize {
-                                file.set_len(task.filesize).await?;
-                            }
-                            let std_file = file.into_std().await;
-                            let mmap = tokio::task::spawn_blocking(
-                                move || -> Result<memmap2::MmapMut, std::io::Error> {
-                                    unsafe { memmap2::MmapMut::map_mut(&std_file) }
-                                },
-                            )
-                            .await
-                            .unwrap()?;
-                            let sync_mmap = std::sync::Arc::new(crate::mmap::SyncMmap::new(mmap));
+                                let file = fs::OpenOptions::new()
+                                    .write(true)
+                                    .read(true)
+                                    .create(true)
+                                    .truncate(false)
+                                    .open(&tmp_path)
+                                    .await?;
+                                if file.metadata().await?.len() != task.filesize {
+                                    file.set_len(task.filesize).await?;
+                                }
+                                let std_file = file.into_std().await;
+                                let mmap = tokio::task::spawn_blocking(
+                                    move || -> Result<memmap2::MmapMut, std::io::Error> {
+                                        unsafe { memmap2::MmapMut::map_mut(&std_file) }
+                                    },
+                                )
+                                .await
+                                .unwrap()?;
+                                let sync_mmap =
+                                    std::sync::Arc::new(crate::mmap::SyncMmap::new(mmap));
 
-                            let mut stream = futures_util::stream::iter(
-                                blocks.clone().into_iter().map(|block| {
-                                    let tmp_path = tmp_path.clone();
-                                    let client = client.clone();
-                                    let url = url.clone();
-                                    let prog = prog.clone();
-                                    let block = block.clone();
-                                    let sync_mmap = sync_mmap.clone();
+                                let mut stream = futures_util::stream::iter(
+                                    blocks.clone().into_iter().map(|block| {
+                                        let tmp_path = tmp_path.clone();
+                                        let client = client.clone();
+                                        let url = url.clone();
+                                        let prog = prog.clone();
+                                        let block = block.clone();
+                                        let sync_mmap = sync_mmap.clone();
 
-                                    async move {
-                                        if verify::check_slice_md5(
-                                            &tmp_path,
-                                            block.start,
-                                            block.size,
-                                            &block.md5,
-                                        )
-                                        .await
-                                        .unwrap_or(false)
-                                        {
-                                            prog(block.size);
-                                            return Ok::<(), Error>(());
+                                        async move {
+                                            if verify::check_slice_md5(
+                                                &tmp_path,
+                                                block.start,
+                                                block.size,
+                                                &block.md5,
+                                            )
+                                            .await
+                                            .unwrap_or(false)
+                                            {
+                                                prog(block.size);
+                                                return Ok::<(), Error>(());
+                                            }
+
+                                            let range_header = format!(
+                                                "bytes={}-{}",
+                                                block.start,
+                                                block.start + block.size - 1
+                                            );
+
+                                            let response = client
+                                                .get(&url)
+                                                .header(RANGE, range_header)
+                                                .send()
+                                                .await?
+                                                .error_for_status()?;
+
+                                            let mut current_offset = block.start as usize;
+                                            let mut stream = response.bytes_stream();
+
+                                            while let Some(chunk) = stream.next().await {
+                                                let data = chunk?;
+                                                sync_mmap.write_at(current_offset, &data)?;
+                                                current_offset += data.len();
+                                                prog(data.len() as u64);
+                                            }
+                                            Ok::<(), Error>(())
                                         }
+                                    }),
+                                )
+                                .buffer_unordered(8);
 
-                                        let range_header = format!(
-                                            "bytes={}-{}",
-                                            block.start,
-                                            block.start + block.size - 1
-                                        );
+                                while let Some(result) = stream.next().await {
+                                    result?;
+                                }
 
-                                        let response = client
-                                            .get(&url)
-                                            .header(RANGE, range_header)
-                                            .send()
-                                            .await?
-                                            .error_for_status()?;
+                                if !verify::check_file_md5(&tmp_path, &task.md5).await? {
+                                    let _ = fs::remove_file(&tmp_path).await;
+                                    return Err(Error::Checksum {
+                                        expected: task.md5.clone(),
+                                        actual: String::from("unknown (block validation)"),
+                                    });
+                                }
 
-                                        let mut current_offset = block.start as usize;
-                                        let mut stream = response.bytes_stream();
-
-                                        while let Some(chunk) = stream.next().await {
-                                            let data = chunk?;
-                                            sync_mmap.write_at(current_offset, &data)?;
-                                            current_offset += data.len();
-                                            prog(data.len() as u64);
-                                        }
-                                        Ok::<(), Error>(())
-                                    }
-                                }),
-                            )
-                            .buffer_unordered(8);
-
-                            while let Some(result) = stream.next().await {
-                                result?;
+                                fs::rename(&tmp_path, &bucket_path).await?;
                             }
-
-                            if !verify::check_file_md5(&tmp_path, &task.md5).await? {
-                                let _ = fs::remove_file(&tmp_path).await;
-                                return Err(Error::Checksum {
-                                    expected: task.md5.clone(),
-                                    actual: String::from("unknown (block validation)"),
-                                });
-                            }
-
-                            fs::rename(&tmp_path, &bucket_path).await?;
                         }
 
                         let _ = fs::remove_file(&target_path).await;

@@ -20,16 +20,10 @@ impl BucketManager {
     }
 
     pub fn get_tmp_path(&self, md5: &str, size: u64) -> PathBuf {
-        let shard = md5.get(0..1).unwrap_or("0");
-        // suffix with timestamp to avoid collisions
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let shard = if md5.is_empty() { "0" } else { &md5[0..1] };
         self.bucket_dir
             .join(shard)
-            .join(format!("tmp.{}.{}.{}", md5, size, ts))
+            .join(format!("tmp.{}.{}", md5, size))
     }
 }
 
