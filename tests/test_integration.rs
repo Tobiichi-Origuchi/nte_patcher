@@ -133,8 +133,14 @@ async fn test_perfectworld_cdn_workflow() -> Result<(), Error> {
     let downloaded_bytes_clone = downloaded_bytes.clone();
 
     manager
-        .start_all(small_tasks.clone(), move |bytes| {
-            downloaded_bytes_clone.fetch_add(bytes, Ordering::Relaxed);
+        .start_all(small_tasks.clone(), move |_task| {
+            let downloaded_bytes_clone = downloaded_bytes_clone.clone();
+            (
+                move |bytes| {
+                    downloaded_bytes_clone.fetch_add(bytes, Ordering::Relaxed);
+                },
+                move || {},
+            )
         })
         .await?;
 

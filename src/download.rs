@@ -45,12 +45,13 @@ impl Downloader {
         loop {
             {
                 if let Ok(mut active) = self.active_downloads.lock()
-                    && active.insert(md5.to_string()) {
-                        return Md5Guard {
-                            md5: md5.to_string(),
-                            active: self.active_downloads.clone(),
-                        };
-                    }
+                    && active.insert(md5.to_string())
+                {
+                    return Md5Guard {
+                        md5: md5.to_string(),
+                        active: self.active_downloads.clone(),
+                    };
+                }
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
@@ -431,7 +432,7 @@ impl Downloader {
                                     file.set_len(task.filesize).await?;
                                 }
                                 let std_file = file.into_std().await;
-                                
+
                                 #[cfg(feature = "mmap")]
                                 let sync_mmap = {
                                     let mmap = tokio::task::spawn_blocking(
@@ -443,9 +444,12 @@ impl Downloader {
                                     .unwrap()?;
                                     std::sync::Arc::new(crate::mmap::SyncMmap::new(mmap))
                                 };
-                                
+
                                 #[cfg(not(feature = "mmap"))]
-                                let sync_mmap = std::sync::Arc::new(crate::mmap::SyncMmap::new(std_file, task.filesize as usize));
+                                let sync_mmap = std::sync::Arc::new(crate::mmap::SyncMmap::new(
+                                    std_file,
+                                    task.filesize as usize,
+                                ));
 
                                 let mut stream = futures_util::stream::iter(
                                     blocks.clone().into_iter().map(|block| {
