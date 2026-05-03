@@ -4,7 +4,7 @@ A high-performance, concurrent NTE game asset downloading and patching SDK imple
 
 ## Features
 
-- **Extreme Performance**: Leverages aggressive memory mapping (`memmap2`) for zero-copy file hashing (MD5) and concurrent direct-to-disk writing.
+- **Extreme Performance**: High-speed file hashing (MD5) and concurrent direct-to-disk writing. Support for aggressive memory mapping (`memmap2`) is available as an optional feature (`mmap`), disabled by default for broader compatibility.
 - **Efficient Concurrency**: Managed asynchronous downloads using `tokio` and `reqwest`, supporting both sequential and block-based parallel downloads.
 - **Robust Storage Architecture**: Cleanly decoupled Storage and Network layers for reliable asset management and symlinking.
 - **Type-Safe Configuration**: Centralized `PatcherConfig` for easy management of concurrency limits, retry policies, and timeouts.
@@ -16,7 +16,10 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-nte_patcher = 0.2
+nte_patcher = "0.2"
+
+# To enable memory mapping for extreme performance:
+# nte_patcher = { version = "0.2", features = ["mmap"] }
 ```
 
 ### Quick Start
